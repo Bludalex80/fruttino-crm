@@ -345,7 +345,7 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
     price_czk:product?.price_czk||"", price_eur:product?.price_eur||"",
     vat_rate:product?.vat_rate||"5", brand:product?.brand||"",
     weight_kg:product?.weight_kg||"", ean:"", category:"",
-    stan:"nowy", skład:"", kraj_pochodzenia:"Turcja", alergeny:"",
+    stan:"nowy", sklad:"", kraj_pochodzenia:"Turcja", alergeny:"",
     dostawa_dni:"2", status:product?.status||"draft",
     tenant_id:TENANT_ID,
   });
@@ -470,7 +470,7 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
           {inp("stan","Stan","text","",{select:true,options:[{value:"nowy",label:"Nowy"},{value:"używany",label:"Używany"}]})}
           {inp("weight_kg","Waga (kg)","number","np. 0.5")}
           {inp("kraj_pochodzenia","Kraj pochodzenia","text","np. Turcja")}
-          {inp("skład","Skład","text","np. morele 100%")}
+          {inp("sklad","Skład","text","np. morele 100%")}
           {inp("alergeny","Alergeny","text","np. może zawierać orzechy")}
         </div>
       </Block>
@@ -673,14 +673,14 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
   useEffect(()=>{load();},[load]);
 
   const exportCSV=()=>{
-    const headers=["sku*","name*","price*","vat_rate","initial_quantity","brand","weight_kg","description","ean","category","skład","kraj_pochodzenia","alergeny","stan","dostawa_dni"];
+    const headers=["sku*","name*","price*","vat_rate","initial_quantity","brand","weight_kg","description","ean","category","sklad","kraj_pochodzenia","alergeny","stan","dostawa_dni"];
     const rows=products.map(p=>[p.sku,p.name,p.price,p.vat_rate,"",p.brand||"",p.weight_kg||"",p.description||"","","","","","","nowy",""]);
     const csv="\uFEFF"+[headers,...rows].map(r=>r.join(",")).join("\n");
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="fruttino_katalog.csv";a.click();
   };
 
   const downloadTemplate=()=>{
-    const lines=["# FRUTTINO CRM — Master plik importu produktów","# * = pole obowiązkowe | bez * = pole opcjonalne","sku*,name*,price*,vat_rate,initial_quantity,brand,weight_kg,description,ean,category,skład,kraj_pochodzenia,alergeny,stan,dostawa_dni","MOR-500,Morele suszone 500g,18.50,5,100,Kaukaz,0.5,Premium suszone morele,5901234567890,Owoce suszone,morele,Turcja,orzechy,nowy,2"];
+    const lines=["# FRUTTINO CRM — Master plik importu produktów","# * = pole obowiązkowe | bez * = pole opcjonalne","sku*,name*,price*,vat_rate,initial_quantity,brand,weight_kg,description,ean,category,sklad,kraj_pochodzenia,alergeny,stan,dostawa_dni","MOR-500,Morele suszone 500g,18.50,5,100,Kaukaz,0.5,Premium suszone morele,5901234567890,Owoce suszone,morele,Turcja,orzechy,nowy,2"];
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+lines.join("\n")],{type:"text/csv;charset=utf-8"}));a.download="fruttino_master_template.csv";a.click();
   };
 
@@ -704,7 +704,7 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
           <h3 style={{ fontSize:16,fontWeight:700,color:C.text,marginBottom:8 }}>Eksport katalogu</h3>
           <p style={{ fontSize:13,color:C.soft,marginBottom:16,lineHeight:1.6 }}>Pobierz pełny katalog produktów w formacie CSV.</p>
           <div style={{ background:C.alt,borderRadius:10,padding:16,marginBottom:16 }}>
-            {["SKU, nazwa, cena, VAT","Stan magazynowy","Marka, waga, opis","EAN, kategoria","Parametry (skład, alergeny, kraj)"].map(item=><div key={item} style={{ fontSize:12,color:C.mid,marginBottom:4,display:"flex",alignItems:"center",gap:6 }}><span style={{ color:C.green }}>✓</span>{item}</div>)}
+            {["SKU, nazwa, cena, VAT","Stan magazynowy","Marka, waga, opis","EAN, kategoria","Parametry (sklad, alergeny, kraj)"].map(item=><div key={item} style={{ fontSize:12,color:C.mid,marginBottom:4,display:"flex",alignItems:"center",gap:6 }}><span style={{ color:C.green }}>✓</span>{item}</div>)}
           </div>
           <button onClick={exportCSV} style={{ width:"100%",padding:10,borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>⬇ Eksportuj katalog ({products.length} produktów)</button>
         </Card>
@@ -714,7 +714,7 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
         <table style={{ width:"100%",borderCollapse:"collapse" }}>
           <thead><tr style={{ background:C.alt }}>{["Pole","Typ","Wymagane","Opis / Przykład"].map(h=><th key={h} style={{ padding:"10px 14px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600,letterSpacing:0.5 }}>{h.toUpperCase()}</th>)}</tr></thead>
           <tbody>
-            {[["sku","tekst","⭐ TAK","Unikalny kod produktu. Np: MOR-500"],["name","tekst","⭐ TAK","Pełna nazwa produktu. Np: Morele suszone 500g"],["price","liczba","⭐ TAK","Cena w PLN. Np: 18.50"],["vat_rate","liczba","○ nie","Stawka VAT: 23, 8, 5, 0. Domyślnie: 23"],["initial_quantity","liczba","○ nie","Stan magazynowy. Domyślnie: 0"],["brand","tekst","○ nie","Marka / producent. Np: Kaukaz"],["weight_kg","liczba","○ nie","Waga w kg. Np: 0.5"],["description","tekst","○ nie","Opis produktu do oferty"],["ean","tekst","○ nie","Kod EAN/GTIN. Np: 5901234567890"],["category","tekst","○ nie","Kategoria. Np: Owoce suszone"],["skład","tekst","○ nie","Skład produktu. Np: morele 100%"],["kraj_pochodzenia","tekst","○ nie","Np: Turcja, Iran, Uzbekistan"],["alergeny","tekst","○ nie","Np: może zawierać orzechy"],["stan","tekst","○ nie","nowy / używany. Domyślnie: nowy"],["dostawa_dni","liczba","○ nie","Czas wysyłki w dniach. Np: 2"]].map(([field,type,req,desc],i)=>(
+            {[["sku","tekst","⭐ TAK","Unikalny kod produktu. Np: MOR-500"],["name","tekst","⭐ TAK","Pełna nazwa produktu. Np: Morele suszone 500g"],["price","liczba","⭐ TAK","Cena w PLN. Np: 18.50"],["vat_rate","liczba","○ nie","Stawka VAT: 23, 8, 5, 0. Domyślnie: 23"],["initial_quantity","liczba","○ nie","Stan magazynowy. Domyślnie: 0"],["brand","tekst","○ nie","Marka / producent. Np: Kaukaz"],["weight_kg","liczba","○ nie","Waga w kg. Np: 0.5"],["description","tekst","○ nie","Opis produktu do oferty"],["ean","tekst","○ nie","Kod EAN/GTIN. Np: 5901234567890"],["category","tekst","○ nie","Kategoria. Np: Owoce suszone"],["sklad","tekst","○ nie","Skład produktu. Np: morele 100%"],["kraj_pochodzenia","tekst","○ nie","Np: Turcja, Iran, Uzbekistan"],["alergeny","tekst","○ nie","Np: może zawierać orzechy"],["stan","tekst","○ nie","nowy / używany. Domyślnie: nowy"],["dostawa_dni","liczba","○ nie","Czas wysyłki w dniach. Np: 2"]].map(([field,type,req,desc],i)=>(
               <tr key={field} style={{ borderBottom:`1px solid ${C.borderLight}`,background:i%2===0?C.surface:C.alt }}>
                 <td style={{ padding:"10px 14px",fontFamily:"monospace",fontSize:12,fontWeight:600,color:C.accent }}>{field}</td>
                 <td style={{ padding:"10px 14px",fontSize:12,color:C.soft }}>{type}</td>
