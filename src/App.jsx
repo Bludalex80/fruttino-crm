@@ -365,6 +365,38 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
   const [saving,setSaving]=useState(false);
   const [activeImg,setActiveImg]=useState(0);
   const fileRef=useRef(null);
+  const [rates,setRates]=useState({ EUR:null, CZK:null, date:null });
+  const [loadingRates,setLoadingRates]=useState(false);
+
+  // Pobierz kursy NBP przy otwarciu
+  useEffect(()=>{
+    (async()=>{
+      setLoadingRates(true);
+      try {
+        const [eurRes,czkRes]=await Promise.all([
+          fetch("https://api.nbp.pl/api/exchangerates/rates/A/EUR/?format=json"),
+          fetch("https://api.nbp.pl/api/exchangerates/rates/A/CZK/?format=json"),
+        ]);
+        const eurData=await eurRes.json();
+        const czkData=await czkRes.json();
+        const eurRate=eurData.rates[0].mid;
+        const czkRate=czkData.rates[0].mid;
+        setRates({ EUR:eurRate, CZK:czkRate, date:eurData.rates[0].effectiveDate });
+      } catch(e){ console.error("NBP error:",e); }
+      setLoadingRates(false);
+    })();
+  },[]);
+
+  // Przelicz ceny przy zmianie PLN lub kursów
+  const recalcPrices=(pricePLN)=>{
+    if(!pricePLN||!rates.EUR||!rates.CZK) return;
+    const pln=parseFloat(pricePLN);
+    if(isNaN(pln)||pln<=0) return;
+    setForm(f=>({...f,
+      price_eur:(pln/rates.EUR).toFixed(2),
+      price_czk:(pln/rates.CZK).toFixed(2),
+    }));
+  };
 
   const uploadImage=async(file)=>{
     if(images.length>=10){ alert("Maksimum 10 zdjęć"); return; }
@@ -501,10 +533,29 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
 
       {/* BLOK 6: Cena i VAT */}
       <Block C={C} num="6" title="Cena i VAT">
+        {/* Kursy NBP */}
+        <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:C.alt,borderRadius:10,border:`1px solid ${C.border}` }}>
+          <span style={{ fontSize:16 }}>🏦</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:11,fontWeight:600,color:C.soft,marginBottom:2 }}>KURSY NBP{rates.date?` (${rates.date})`:""}</div>
+            <div style={{ fontSize:13,color:C.text }}>
+              {loadingRates ? "Pobieranie kursów..." : rates.EUR ? (
+                `1 EUR = ${rates.EUR?.toFixed(4)} PLN · 1 CZK = ${rates.CZK?.toFixed(4)} PLN`
+              ) : "Nie udało się pobrać kursów NBP"}
+            </div>
+          </div>
+          <button onClick={()=>recalcPrices(form.price)} disabled={!rates.EUR||!form.price||loadingRates} style={{ padding:"7px 14px",borderRadius:8,border:"none",background:rates.EUR&&form.price?C.accent:C.border,color:"#fff",fontSize:12,fontWeight:600,cursor:rates.EUR&&form.price?"pointer":"not-allowed",fontFamily:"inherit",whiteSpace:"nowrap",opacity:loadingRates?0.6:1 }}>
+            ↻ Przelicz
+          </button>
+        </div>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12 }}>
-          {inp("price","Cena PLN *","number","18.50")}
-          {inp("price_czk","Cena CZK","number","80")}
-          {inp("price_eur","Cena EUR","number","4.50")}
+          <div>
+            <div style={{ fontSize:11,fontWeight:600,color:C.soft,marginBottom:5 }}>Cena PLN *</div>
+            <input type="number" value={form.price} onChange={e=>{ setForm({...form,price:e.target.value}); recalcPrices(e.target.value); }} placeholder="18.50" style={{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.accent}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none",boxSizing:"border-box",fontWeight:600 }}/>
+            {rates.EUR&&form.price&&<div style={{ fontSize:10,color:C.soft,marginTop:3 }}>Zmień → auto przelicz</div>}
+          </div>
+          {inp("price_czk","Cena CZK (auto)","number","auto")}
+          {inp("price_eur","Cena EUR (auto)","number","auto")}
           {inp("vat_rate","Stawka VAT","text","",{select:true,options:[{value:"23",label:"23%"},{value:"8",label:"8%"},{value:"5",label:"5%"},{value:"0",label:"0%"}]})}
         </div>
       </Block>
