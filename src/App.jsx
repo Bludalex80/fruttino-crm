@@ -858,13 +858,123 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
   );
 };
 
+// ── ALLEGRO AUTH MODAL (Device Flow) ───────────────────────
+const AllegroAuthModal = ({ channel, onClose, onSuccess, C }) => {
+  const [step,setStep]=useState("start"); // start | waiting | done | error
+  const [authData,setAuthData]=useState(null);
+  const [message,setMessage]=useState("");
+  const [pollTimer,setPollTimer]=useState(null);
+
+  const startAuth=async()=>{
+    setStep("loading");setMessage("Uruchamianie autoryzacji...");
+    const res=await apiFetch(`/allegro?action=auth-start`,{method:"POST",body:JSON.stringify({channel_id:channel.id})});
+    if(!res.success){setStep("error");setMessage(res.error||"Błąd autoryzacji");return;}
+    setAuthData(res.data);
+    setStep("waiting");
+    setMessage("Otwórz link poniżej i zaloguj się na swoje konto Allegro");
+    // Start polling
+    const interval=setInterval(async()=>{
+      const poll=await apiFetch(`/allegro?action=auth-poll`,{method:"POST",body:JSON.stringify({channel_id:channel.id,device_code:res.data.device_code})});
+      if(poll.data?.status==="authorized"){
+        clearInterval(interval);setStep("done");setMessage("✅ Połączono z Allegro!");
+        setTimeout(()=>{onSuccess();onClose();},1500);
+      } else if(poll.data?.status==="pending"){
+        // nadal czekamy
+      } else {
+        clearInterval(interval);setStep("error");setMessage(poll.error||"Błąd podczas autoryzacji");
+      }
+    },(res.data.interval||5)*1000);
+    setPollTimer(interval);
+  };
+
+  useEffect(()=>()=>{ if(pollTimer) clearInterval(pollTimer); },[pollTimer]);
+
+  return (
+    <Modal title={`Połącz z Allegro — ${channel.name}`} onClose={onClose} C={C} width={520}>
+      {/* Krok 1 — start */}
+      {step==="start"&&(
+        <div style={{ textAlign:"center",padding:"20px 0" }}>
+          <div style={{ fontSize:48,marginBottom:16 }}>🛒</div>
+          <div style={{ fontSize:16,fontWeight:700,color:C.text,marginBottom:8 }}>Autoryzacja przez Allegro OAuth 2.0</div>
+          <div style={{ fontSize:13,color:C.soft,marginBottom:24,lineHeight:1.7 }}>
+            Kliknij przycisk poniżej. Otworzymy stronę Allegro<br/>gdzie zalogujesz się i zatwierdzisz dostęp.
+          </div>
+          <div style={{ background:C.alt,borderRadius:10,padding:16,marginBottom:24,textAlign:"left" }}>
+            <div style={{ fontSize:12,fontWeight:600,color:C.soft,marginBottom:8 }}>CO OTRZYMA DOSTĘP:</div>
+            {["Odczyt zamówień","Aktualizacja stanów magazynowych","Zarządzanie ofertami","Dane konta"].map(p=>(
+              <div key={p} style={{ display:"flex",alignItems:"center",gap:8,fontSize:13,color:C.mid,marginBottom:4 }}><span style={{ color:C.green }}>✓</span>{p}</div>
+            ))}
+          </div>
+          <button onClick={startAuth} style={{ width:"100%",padding:"14px",borderRadius:10,border:"none",background:C.orange,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+            🔐 Połącz z Allegro
+          </button>
+        </div>
+      )}
+
+      {/* Krok 2 — loading */}
+      {step==="loading"&&(
+        <div style={{ textAlign:"center",padding:"32px 0" }}>
+          <Spinner size={24} C={C}/>
+          <div style={{ fontSize:14,color:C.mid,marginTop:16 }}>{message}</div>
+        </div>
+      )}
+
+      {/* Krok 3 — czekamy na użytkownika */}
+      {step==="waiting"&&authData&&(
+        <div>
+          <div style={{ background:C.orangeBg,borderRadius:12,padding:20,marginBottom:20,border:`1px solid ${C.orange}33` }}>
+            <div style={{ fontSize:13,fontWeight:600,color:C.orange,marginBottom:8 }}>KROK 1 — Otwórz link i zaloguj się</div>
+            <a href={authData.verification_uri} target="_blank" rel="noreferrer" style={{ display:"block",padding:"12px 16px",background:C.orange,color:"#fff",borderRadius:9,textDecoration:"none",fontSize:14,fontWeight:700,textAlign:"center",marginBottom:10 }}>
+              🔗 Otwórz stronę autoryzacji Allegro
+            </a>
+            <div style={{ fontSize:12,color:C.soft,textAlign:"center" }}>lub wpisz ręcznie: <strong style={{ color:C.text }}>allegro.pl/autoryzacja</strong></div>
+          </div>
+
+          <div style={{ background:C.alt,borderRadius:12,padding:20,marginBottom:20,textAlign:"center" }}>
+            <div style={{ fontSize:12,fontWeight:600,color:C.soft,marginBottom:8 }}>KROK 2 — Wpisz kod na stronie Allegro</div>
+            <div style={{ fontSize:32,fontWeight:800,color:C.accent,letterSpacing:6,fontFamily:"monospace" }}>
+              {authData.user_code}
+            </div>
+          </div>
+
+          <div style={{ display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:C.blueBg,borderRadius:10 }}>
+            <div style={{ width:20,height:20,border:`2px solid ${C.accent}`,borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite",flexShrink:0 }}/>
+            <div style={{ fontSize:13,color:C.blue }}>Oczekiwanie na autoryzację... Polling co {authData.interval||5}s</div>
+          </div>
+        </div>
+      )}
+
+      {/* Krok 4 — sukces */}
+      {step==="done"&&(
+        <div style={{ textAlign:"center",padding:"32px 0" }}>
+          <div style={{ fontSize:48,marginBottom:16 }}>🎉</div>
+          <div style={{ fontSize:18,fontWeight:700,color:C.green,marginBottom:8 }}>Połączono z Allegro!</div>
+          <div style={{ fontSize:14,color:C.soft }}>Kanał jest teraz aktywny. Możesz synchronizować zamówienia.</div>
+        </div>
+      )}
+
+      {/* Błąd */}
+      {step==="error"&&(
+        <div style={{ textAlign:"center",padding:"20px 0" }}>
+          <div style={{ fontSize:48,marginBottom:16 }}>❌</div>
+          <div style={{ fontSize:16,fontWeight:600,color:C.red,marginBottom:8 }}>Błąd autoryzacji</div>
+          <div style={{ fontSize:13,color:C.soft,marginBottom:20 }}>{message}</div>
+          <button onClick={()=>setStep("start")} style={{ padding:"10px 24px",borderRadius:9,border:"none",background:C.accent,color:"#fff",fontSize:14,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>Spróbuj ponownie</button>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 // ── CHANNELS TAB ───────────────────────────────────────────
 const ChannelsTab = ({ isMobile, C }) => {
   const [channels,setChannels]=useState([]);
   const [loading,setLoading]=useState(true);
   const [testing,setTesting]=useState(null);
+  const [syncing,setSyncing]=useState(null);
   const [testResult,setTestResult]=useState({});
   const [configModal,setConfigModal]=useState(null);
+  const [allegroModal,setAllegroModal]=useState(null);
   const [configData,setConfigData]=useState({});
   const [saving,setSaving]=useState(false);
   const [editingName,setEditingName]=useState(null);
@@ -875,29 +985,27 @@ const ChannelsTab = ({ isMobile, C }) => {
 
   const testConn=async(id)=>{ setTesting(id);const res=await apiFetch(`/channels/${id}/test`,{method:"POST",body:"{}"});setTestResult(p=>({...p,[id]:res.data||res}));setTesting(null); };
 
-  const saveName=async(id)=>{
-    await apiFetch(`/channels/${id}`,{method:"PUT",body:JSON.stringify({name:newName})});
-    setEditingName(null);setNewName("");
-    await loadCh();
+  const syncOrders=async(ch)=>{
+    setSyncing(ch.id);
+    const res=await apiFetch(`/allegro?action=sync-orders`,{method:"POST",body:JSON.stringify({channel_id:ch.id,tenant_id:TENANT_ID})});
+    setTestResult(p=>({...p,[ch.id]:{ has_keys:res.success, message:res.data?.message||res.error||"Błąd synchronizacji" }}));
+    setSyncing(null);
   };
 
-  const saveConfig=async()=>{ setSaving(true);await apiFetch(`/channels/${configModal.id}`,{method:"PUT",body:JSON.stringify(configData)});setSaving(false);setConfigModal(null);await loadCh(); };
+  const saveName=async(id)=>{
+    await apiFetch(`/channels/${id}`,{method:"PUT",body:JSON.stringify({name:newName})});
+    setEditingName(null);setNewName("");await loadCh();
+  };
+
+  const saveConfig=async()=>{
+    setSaving(true);
+    await apiFetch(`/channels/${configModal.id}`,{method:"PUT",body:JSON.stringify(configData)});
+    setSaving(false);setConfigModal(null);await loadCh();
+  };
 
   const inp={style:{width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none",boxSizing:"border-box"}};
 
-  const ConfigFields=({ch})=> ch.type==="allegro"?(
-    <>
-      <div style={{ fontSize:13,color:C.mid,marginBottom:16,padding:"10px 12px",background:C.blueBg,borderRadius:8 }}>Dane z <strong>developer.allegro.pl</strong> → Twoje aplikacje</div>
-      {[{key:"api_key",label:"Client ID",ph:"xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"},{key:"api_secret",label:"Client Secret",ph:"Wklej Client Secret"}].map(f=>(
-        <div key={f.key} style={{ marginBottom:14 }}><div style={{ fontSize:11,fontWeight:600,color:C.soft,marginBottom:6 }}>{f.label}</div><input {...inp} placeholder={f.ph} value={configData[f.key]||""} onChange={e=>setConfigData({...configData,[f.key]:e.target.value})} type={f.key==="api_secret"?"password":"text"}/></div>
-      ))}
-      <div style={{ marginBottom:14 }}><div style={{ fontSize:11,fontWeight:600,color:C.soft,marginBottom:6 }}>Kraj marketplace</div>
-        <select {...inp} value={configData.country||ch.country||"PL"} onChange={e=>setConfigData({...configData,country:e.target.value})}>
-          <option value="PL">🇵🇱 Allegro PL</option><option value="CZ">🇨🇿 Allegro CZ</option><option value="SK">🇸🇰 Allegro SK</option><option value="HU">🇭🇺 Allegro HU</option>
-        </select>
-      </div>
-    </>
-  ):ch.type==="woocommerce"?(
+  const ConfigFields=({ch})=> ch.type==="woocommerce"?(
     <>
       <div style={{ fontSize:13,color:C.mid,marginBottom:16,padding:"10px 12px",background:C.blueBg,borderRadius:8 }}>WooCommerce → Ustawienia → Zaawansowane → REST API</div>
       {[{key:"shop_url",label:"URL sklepu",ph:"https://twojsklep.pl"},{key:"api_key",label:"Consumer Key",ph:"ck_xxxxxxxxxxxxxxxxxxxx"},{key:"api_secret",label:"Consumer Secret",ph:"cs_xxxxxxxxxxxxxxxxxxxx"}].map(f=>(
@@ -908,16 +1016,29 @@ const ChannelsTab = ({ isMobile, C }) => {
 
   return (
     <div style={{ padding:isMobile?"12px 12px 20px":0 }}>
-      {!isMobile&&<div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}><h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Kanały sprzedaży</h2><div style={{ fontSize:13,color:C.soft }}>{channels.length} kanałów</div></div>}
+      {!isMobile&&<div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Kanały sprzedaży</h2>
+        <div style={{ fontSize:13,color:C.soft }}>{channels.length} kanałów · <span style={{ color:C.green }}>Allegro Sandbox</span></div>
+      </div>}
       {loading?<Spinner size={24} C={C}/>:(
-        <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(320px,1fr))",gap:isMobile?8:16 }}>
+        <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(340px,1fr))",gap:isMobile?8:16 }}>
           {channels.map(ch=>{
-            const src=ch.type==="allegro"?SOURCE.allegro:SOURCE.woocommerce;const tr=testResult[ch.id];const isEditing=editingName===ch.id;
+            const src=ch.type==="allegro"?SOURCE.allegro:SOURCE.woocommerce;
+            const tr=testResult[ch.id];
+            const isEditing=editingName===ch.id;
+            const isAllegro=ch.type==="allegro";
+            const isConnected=ch.is_active&&ch.access_token;
+
             return (
-              <Card key={ch.id} C={C} style={{ padding:20 }}>
+              <Card key={ch.id} C={C} style={{ padding:20,border:isConnected?`1px solid ${C.green}`:`1px solid ${C.border}` }}>
+                {/* Nagłówek */}
                 <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12 }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}><Pill label={ch.type==="allegro"?"Allegro":"WooCommerce"} color={src.color} bg={src.bg} textColor={src.color}/><span style={{ fontSize:12,background:C.alt,color:C.mid,padding:"2px 8px",borderRadius:6,border:`1px solid ${C.border}` }}>{ch.country}</span></div>
+                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
+                      <Pill label={isAllegro?"Allegro":"WooCommerce"} color={src.color} bg={src.bg} textColor={src.color}/>
+                      <span style={{ fontSize:12,background:C.alt,color:C.mid,padding:"2px 8px",borderRadius:6,border:`1px solid ${C.border}` }}>{ch.country}</span>
+                      {isAllegro&&<span style={{ fontSize:10,background:"#fff7ed",color:"#ea580c",padding:"2px 6px",borderRadius:4,fontWeight:600 }}>SANDBOX</span>}
+                    </div>
                     {isEditing?(
                       <div style={{ display:"flex",gap:6,alignItems:"center" }}>
                         <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveName(ch.id)} autoFocus style={{ flex:1,padding:"6px 10px",borderRadius:7,border:`1px solid ${C.accent}`,fontSize:14,fontWeight:600,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none" }}/>
@@ -930,20 +1051,46 @@ const ChannelsTab = ({ isMobile, C }) => {
                         <button onClick={()=>{setEditingName(ch.id);setNewName(ch.name);}} style={{ border:"none",background:"transparent",cursor:"pointer",color:C.soft,fontSize:13,padding:2 }}>✏</button>
                       </div>
                     )}
-                    {ch.shop_url&&<div style={{ fontSize:12,color:C.soft,marginTop:2 }}>{ch.shop_url}</div>}
                   </div>
-                  <div style={{ display:"flex",alignItems:"center",gap:5,flexShrink:0 }}><span style={{ width:8,height:8,borderRadius:"50%",background:ch.is_active?C.green:C.soft,display:"block" }}/><span style={{ fontSize:11,color:ch.is_active?C.green:C.soft }}>{ch.is_active?"Aktywny":"Nieaktywny"}</span></div>
+                  <div style={{ display:"flex",alignItems:"center",gap:5,flexShrink:0 }}>
+                    <span style={{ width:8,height:8,borderRadius:"50%",background:isConnected?C.green:C.soft,display:"block" }}/>
+                    <span style={{ fontSize:11,color:isConnected?C.green:C.soft,fontWeight:600 }}>{isConnected?"Połączony":"Niepołączony"}</span>
+                  </div>
                 </div>
+
+                {/* Wynik testu / synchronizacji */}
                 {tr&&<div style={{ marginBottom:12,fontSize:13,padding:"8px 12px",borderRadius:8,background:tr.has_keys?C.greenBg:C.amberBg,color:tr.has_keys?"#065f46":"#92400e" }}>{tr.has_keys?"✅":"⚠️"} {tr.message}</div>}
-                <div style={{ display:"flex",gap:8 }}>
-                  <button onClick={()=>testConn(ch.id)} disabled={testing===ch.id} style={{ flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===ch.id?0.6:1 }}>{testing===ch.id?"Testowanie...":"🔍 Testuj"}</button>
-                  <button onClick={()=>{setConfigModal(ch);setConfigData({});}} style={{ padding:"8px 16px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>⚙ Konfiguruj</button>
-                </div>
+
+                {/* Przyciski akcji */}
+                {isAllegro?(
+                  <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                    <button onClick={()=>setAllegroModal(ch)} style={{ width:"100%",padding:"10px",borderRadius:9,border:isConnected?`1px solid ${C.green}`:"none",background:isConnected?C.greenBg:C.orange,color:isConnected?"#065f46":"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+                      {isConnected?"✅ Połączono — odśwież token":"🔐 Połącz z Allegro (OAuth)"}
+                    </button>
+                    {isConnected&&(
+                      <div style={{ display:"flex",gap:8 }}>
+                        <button onClick={()=>testConn(ch.id)} disabled={testing===ch.id} style={{ flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===ch.id?0.6:1 }}>
+                          {testing===ch.id?"...":"🔍 Status"}
+                        </button>
+                        <button onClick={()=>syncOrders(ch)} disabled={syncing===ch.id} style={{ flex:2,padding:"8px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:syncing===ch.id?0.6:1 }}>
+                          {syncing===ch.id?"⏳ Synchronizacja...":"⬇ Synchronizuj zamówienia"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ):(
+                  <div style={{ display:"flex",gap:8 }}>
+                    <button onClick={()=>testConn(ch.id)} disabled={testing===ch.id} style={{ flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===ch.id?0.6:1 }}>{testing===ch.id?"Testowanie...":"🔍 Testuj"}</button>
+                    <button onClick={()=>{setConfigModal(ch);setConfigData({});}} style={{ padding:"8px 16px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>⚙ Konfiguruj</button>
+                  </div>
+                )}
               </Card>
             );
           })}
         </div>
       )}
+
+      {/* Modal WooCommerce config */}
       {configModal&&(
         <Modal title={`Konfiguracja: ${configModal.name}`} onClose={()=>setConfigModal(null)} C={C}>
           <ConfigFields ch={configModal}/>
@@ -952,6 +1099,11 @@ const ChannelsTab = ({ isMobile, C }) => {
             <button onClick={saveConfig} disabled={saving} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:saving?0.7:1 }}>{saving?"Zapisywanie...":"💾 Zapisz i połącz"}</button>
           </div>
         </Modal>
+      )}
+
+      {/* Modal Allegro OAuth */}
+      {allegroModal&&(
+        <AllegroAuthModal channel={allegroModal} onClose={()=>setAllegroModal(null)} onSuccess={loadCh} C={C}/>
       )}
     </div>
   );
