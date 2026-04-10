@@ -875,12 +875,14 @@ const AllegroAuthModal = ({ channel, onClose, onSuccess, C }) => {
     // Start polling
     const interval=setInterval(async()=>{
       const poll=await apiFetch(`/allegro?action=auth-poll`,{method:"POST",body:JSON.stringify({channel_id:channel.id,device_code:res.data.device_code})});
-      if(poll.data?.status==="authorized"){
+      console.log("Poll response:", JSON.stringify(poll));
+      const status = poll?.data?.status || poll?.status;
+      if(status==="authorized" || poll?.data?.access_token){
         clearInterval(interval);setStep("done");setMessage("✅ Połączono z Allegro!");
         setTimeout(()=>{onSuccess();onClose();},1500);
-      } else if(poll.data?.status==="pending"){
+      } else if(status==="pending" || poll?.data?.error==="authorization_pending"){
         // nadal czekamy
-      } else {
+      } else if(poll?.success===false){
         clearInterval(interval);setStep("error");setMessage(poll.error||"Błąd podczas autoryzacji");
       }
     },(res.data.interval||5)*1000);
@@ -1027,7 +1029,7 @@ const ChannelsTab = ({ isMobile, C }) => {
             const tr=testResult[ch.id];
             const isEditing=editingName===ch.id;
             const isAllegro=ch.type==="allegro";
-            const isConnected=ch.is_active&&ch.access_token;
+            const isConnected=ch.is_active&&(ch.access_token||ch.token_expires_at||ch.has_token);
 
             return (
               <Card key={ch.id} C={C} style={{ padding:20,border:isConnected?`1px solid ${C.green}`:`1px solid ${C.border}` }}>
