@@ -337,6 +337,17 @@ const DashboardTab = ({ stats, C }) => (
   </div>
 );
 
+// ── PRODUCT CARD BLOCK ─────────────────────────────────────
+const Block = ({ num, title, children, C }) => (
+  <div style={{ marginBottom:24 }}>
+    <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:14,paddingBottom:10,borderBottom:`2px solid ${C.accent}` }}>
+      <div style={{ width:26,height:26,borderRadius:"50%",background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0 }}>{num}</div>
+      <div style={{ fontSize:15,fontWeight:700,color:C.text }}>{title}</div>
+    </div>
+    {children}
+  </div>
+);
+
 // ── PRODUCT CARD MODAL (Allegro style) ─────────────────────
 const ProductCardModal = ({ product, onClose, onSave, C }) => {
   const [form,setForm]=useState({
@@ -375,7 +386,22 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
 
   const save=async()=>{
     setSaving(true);
-    const payload={ ...form, price:parseFloat(form.price)||0, weight_kg:form.weight_kg?parseFloat(form.weight_kg):null, images };
+    const toNum=(v)=>v===''||v===null||v===undefined?null:parseFloat(v)||null;
+    const toInt=(v)=>v===''||v===null||v===undefined?null:parseInt(v)||null;
+    const payload={ ...form,
+      price:parseFloat(form.price)||0,
+      price_czk:toNum(form.price_czk),
+      price_eur:toNum(form.price_eur),
+      weight_kg:toNum(form.weight_kg),
+      dostawa_dni:toInt(form.dostawa_dni),
+      ean:form.ean||null,
+      category:form.category||null,
+      stan:form.stan||'nowy',
+      sklad:form.sklad||null,
+      kraj_pochodzenia:form.kraj_pochodzenia||null,
+      alergeny:form.alergeny||null,
+      images,
+    };
     let res;
     if(product?.id) res=await apiFetch(`/products/${product.id}`,{method:"PUT",body:JSON.stringify(payload)});
     else res=await apiFetch("/products",{method:"POST",body:JSON.stringify({...payload,initial_quantity:0})});
@@ -399,20 +425,12 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
     </div>
   );
 
-  const Block=({num,title,children})=>(
-    <div style={{ marginBottom:24 }}>
-      <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:14,paddingBottom:10,borderBottom:`2px solid ${C.accent}` }}>
-        <div style={{ width:26,height:26,borderRadius:"50%",background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff",flexShrink:0 }}>{num}</div>
-        <div style={{ fontSize:15,fontWeight:700,color:C.text }}>{title}</div>
-      </div>
-      {children}
-    </div>
-  );
+
 
   return (
     <Modal title={product?.id?"Edytuj produkt":"Nowy produkt (karta Allegro)"} onClose={onClose} C={C} width={720}>
       {/* BLOK 1: Zdjęcia */}
-      <Block num="1" title="Zdjęcia produktu">
+      <Block C={C} num="1" title="Zdjęcia produktu">
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
           <div>
             <div style={{ width:"100%",aspectRatio:"1",background:C.alt,borderRadius:10,border:`2px solid ${C.border}`,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:8 }}>
@@ -450,13 +468,13 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
       </Block>
 
       {/* BLOK 2: Tytuł */}
-      <Block num="2" title="Tytuł oferty">
+      <Block C={C} num="2" title="Tytuł oferty">
         {inp("name","Tytuł *","text","np. Morele suszone premium 500g | bez pestek | Turcja")}
         <div style={{ fontSize:11,color:C.soft,marginTop:4 }}>{form.name.length}/75 znaków (rekomendowane słowa kluczowe na początku)</div>
       </Block>
 
       {/* BLOK 3: Kategoria i EAN */}
-      <Block num="3" title="Kategoria i kod produktu">
+      <Block C={C} num="3" title="Kategoria i kod produktu">
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
           {inp("ean","Kod EAN / GTIN","text","np. 5901234567890")}
           {inp("category","Kategoria","text","np. Owoce suszone")}
@@ -464,7 +482,7 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
       </Block>
 
       {/* BLOK 4: Parametry */}
-      <Block num="4" title="Parametry (cechy)">
+      <Block C={C} num="4" title="Parametry (cechy)">
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
           {inp("brand","Marka","text","np. Kaukaz")}
           {inp("stan","Stan","text","",{select:true,options:[{value:"nowy",label:"Nowy"},{value:"używany",label:"Używany"}]})}
@@ -476,13 +494,13 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
       </Block>
 
       {/* BLOK 5: Opis */}
-      <Block num="5" title="Opis produktu">
+      <Block C={C} num="5" title="Opis produktu">
         {inp("short_description","Krótki opis (nagłówek)","text","np. Premium suszone morele bez pestek")}
         <div style={{ marginTop:12 }}>{inp("description","Pełny opis","text","",{textarea:true})}</div>
       </Block>
 
       {/* BLOK 6: Cena i VAT */}
-      <Block num="6" title="Cena i VAT">
+      <Block C={C} num="6" title="Cena i VAT">
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12 }}>
           {inp("price","Cena PLN *","number","18.50")}
           {inp("price_czk","Cena CZK","number","80")}
@@ -492,7 +510,7 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
       </Block>
 
       {/* BLOK 7: Dostawa */}
-      <Block num="7" title="Dostawa">
+      <Block C={C} num="7" title="Dostawa">
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
           {inp("dostawa_dni","Czas wysyłki (dni)","number","2")}
           <div>
@@ -503,7 +521,7 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
       </Block>
 
       {/* BLOK 8: Stan magazynowy */}
-      <Block num="8" title="Stan magazynowy i kanały">
+      <Block C={C} num="8" title="Stan magazynowy i kanały">
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
           {inp("sku","SKU *","text","np. MOR-500")}
           {inp("status","Status oferty","text","",{select:true,options:[{value:"draft",label:"Szkic"},{value:"active",label:"Aktywna"},{value:"inactive",label:"Nieaktywna"}]})}
