@@ -877,7 +877,7 @@ export default function App() {
         <>
           <Sidebar tab={tab} setTab={setTab} stats={stats} user={session.user} onLogout={logout}/>
           <main style={{ marginLeft:220,minHeight:"100vh",padding:"32px 36px" }}>
-            <StatCards stats={stats} isMobile={false}/>
+            {tab!=="dashboard" && <StatCards stats={stats} isMobile={false}/>}
             {tab==="dashboard"  && <DashboardTab  stats={stats} isMobile={false}/>}
             {tab==="orders"     && <OrdersTab     isMobile={false}/>}
             {tab==="products"   && <ProductsTab   isMobile={false}/>}
