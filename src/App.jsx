@@ -55,6 +55,19 @@ const SOURCE = {
   woocommerce: { color:"#2563eb", bg:"#dbeafe" },
 };
 
+const DELIVERY_STATUS = {
+  pending:   { label:"Oczekiwanie", dot:"#d97706", bg:"#fef3c7", text:"#92400e" },
+  transit:   { label:"W drodze",    dot:"#2563eb", bg:"#dbeafe", text:"#1e40af" },
+  delivered: { label:"Dostarczone", dot:"#16a34a", bg:"#dcfce7", text:"#065f46" },
+  complaint: { label:"Reklamacja",  dot:"#dc2626", bg:"#fee2e2", text:"#991b1b" },
+};
+const COUNTRY_FLAGS = { TR:"🇹🇷", IR:"🇮🇷", UZ:"🇺🇿", PL:"🇵🇱", DE:"🇩🇪", CN:"🇨🇳", IN:"🇮🇳" };
+const MOCK_DELIVERIES = [
+  { id:"DEL-001", supplier:"Importex Sp. z o.o.", country:"TR", products:[{name:"Morele suszone 500g",qty_expected:500,qty_received:0,ean:"5901234567890"},{name:"Figi suszone 250g",qty_expected:200,qty_received:0,ean:"5901234567891"}], tracking:"PC123456789PL", carrier:"DHL", amount:4850.00, status:"transit", created_at:"2026-04-18T10:00:00Z", updated_at:"2026-04-19T09:00:00Z" },
+  { id:"DEL-002", supplier:"DryFruits PL", country:"IR", products:[{name:"Pistacje solone 1kg",qty_expected:100,qty_received:97,ean:"5901234567892"}], tracking:"PC987654321PL", carrier:"InPost", amount:2200.00, status:"delivered", created_at:"2026-04-10T08:00:00Z", updated_at:"2026-04-15T14:00:00Z" },
+  { id:"DEL-003", supplier:"Bakaliowe.pl", country:"UZ", products:[{name:"Rodzynki sułtańskie 500g",qty_expected:300,qty_received:0,ean:"5901234567893"},{name:"Daktyle Medjool 1kg",qty_expected:150,qty_received:0,ean:"5901234567894"}], tracking:null, carrier:null, amount:1900.00, status:"pending", created_at:"2026-04-20T09:00:00Z", updated_at:"2026-04-20T09:00:00Z" },
+];
+
 // ── SHARED ─────────────────────────────────────────────────
 const Pill = ({ label, color, bg, textColor, dot }) => (
   <span style={{ display:"inline-flex",alignItems:"center",gap:4,background:bg,color:textColor,fontSize:11,fontWeight:600,padding:"3px 9px",borderRadius:100,whiteSpace:"nowrap" }}>
@@ -194,9 +207,10 @@ const Sidebar = ({ tab, setTab, subTab, setSubTab, stats, C }) => {
     { id:"products", icon:"🌿", label:"Produkty", badge:stats.lowStock>0?stats.lowStock:null,
       sub:[{id:"products-list",label:"Lista produktów"},{id:"products-stock",label:"Kontrola magazynu"},{id:"products-actions",label:"Automatyczne akcje"},{id:"products-import",label:"Import/Eksport"},{id:"products-settings",label:"Ustawienia"}]
     },
-    { id:"channels",  icon:"🔗", label:"Kanały sprzedaży" },
-    { id:"couriers",  icon:"🚚", label:"Kurierzy" },
-    { id:"analytics", icon:"📊", label:"Analityka" },
+    { id:"channels",   icon:"🔗", label:"Kanały sprzedaży" },
+    { id:"couriers",   icon:"🚚", label:"Kurierzy" },
+    { id:"deliveries", icon:"📥", label:"Dostawy" },
+    { id:"analytics",  icon:"📊", label:"Analityka" },
   ];
   const toggle=(id)=>setExpanded(p=>({...p,[id]:!p[id]}));
   return (
@@ -589,11 +603,186 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
   );
 };
 
+// ── ORDER DETAIL VIEW ──────────────────────────────────────
+const OrderDetailView = ({ order: initialOrder, orders, onBack, C, onStatusUpdate }) => {
+  const [order, setOrder] = useState(initialOrder);
+  const [updating, setUpdating] = useState(false);
+  const idx = orders.findIndex(o => o.id === order.id);
+  const st = STATUS_CFG[order.status] || STATUS_CFG.new;
+  const src = SOURCE[order.channels?.type] || SOURCE.allegro;
+  const items = Array.isArray(order.items) ? order.items : [];
+  const totalAmount = parseFloat(order.total_amount || 0);
+  const navigate = (newOrder) => setOrder(newOrder);
+  const changeStatus = async (newStatus) => {
+    setUpdating(true);
+    const res = await apiFetch(`/orders/${order.id}`, { method:"PUT", body:JSON.stringify({ status:newStatus }) });
+    if (res.success) { setOrder(prev=>({...prev,status:newStatus,updated_at:new Date().toISOString()})); onStatusUpdate&&onStatusUpdate(order.id,newStatus); }
+    setUpdating(false);
+  };
+  return (
+    <div>
+      {/* Nav bar */}
+      <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,paddingBottom:16,borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+          <button onClick={onBack} style={{ display:"flex",alignItems:"center",gap:6,padding:"7px 16px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:500 }}>← Wróć do listy zamówień</button>
+          <div style={{ display:"flex",gap:4,alignItems:"center" }}>
+            <button onClick={()=>idx>0&&navigate(orders[idx-1])} disabled={idx<=0} style={{ width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:C.surface,cursor:idx>0?"pointer":"not-allowed",color:idx>0?C.text:C.soft,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",opacity:idx<=0?0.35:1 }}>‹</button>
+            <span style={{ fontSize:12,color:C.soft,minWidth:60,textAlign:"center" }}>{idx+1} / {orders.length}</span>
+            <button onClick={()=>idx<orders.length-1&&navigate(orders[idx+1])} disabled={idx>=orders.length-1} style={{ width:28,height:28,borderRadius:6,border:`1px solid ${C.border}`,background:C.surface,cursor:idx<orders.length-1?"pointer":"not-allowed",color:idx<orders.length-1?C.text:C.soft,fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",opacity:idx>=orders.length-1?0.35:1 }}>›</button>
+          </div>
+        </div>
+        <div style={{ display:"flex",gap:6 }}>
+          {[{l:"🧾 Paragon"},{l:"📄 Faktura"},{l:"🖨 Drukuj",onClick:()=>window.print()},{l:"📦 Pakuj"},{l:"⚡ Akcje"}].map(btn=>(
+            <button key={btn.l} onClick={btn.onClick} style={{ padding:"7px 12px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500 }}>{btn.l}</button>
+          ))}
+        </div>
+      </div>
+      {/* Title */}
+      <div style={{ display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24 }}>
+        <div>
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:4 }}>
+            <h1 style={{ fontSize:22,fontWeight:800,color:C.text }}>#{order.external_id||order.id?.slice(0,12)}</h1>
+            <Pill label={st.label} color={st.dot} bg={st.bg} textColor={st.text} dot={true}/>
+          </div>
+          <div style={{ fontSize:14,color:C.soft }}>{order.customer_name} · {order.created_at?new Date(order.created_at).toLocaleString("pl-PL"):""}</div>
+        </div>
+      </div>
+      {/* Two-column layout */}
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 300px",gap:20 }}>
+        {/* LEFT */}
+        <div style={{ display:"flex",flexDirection:"column",gap:16 }}>
+          {/* Order info block */}
+          <Card C={C} style={{ padding:20 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:14 }}>INFORMACJE O ZAMÓWIENIU</div>
+            <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16 }}>
+              <div><div style={{ fontSize:11,color:C.soft,marginBottom:3 }}>KWOTA PŁATNOŚCI</div><div style={{ fontSize:24,fontWeight:800,color:C.text,fontFamily:"monospace" }}>{totalAmount.toFixed(2)}</div><div style={{ fontSize:12,color:C.soft }}>{order.currency||"PLN"}</div></div>
+              <div><div style={{ fontSize:11,color:C.soft,marginBottom:3 }}>KLIENT</div><div style={{ fontSize:14,fontWeight:600,color:C.text }}>{order.customer_name||"—"}</div><div style={{ fontSize:12,color:C.soft }}>{order.customer_email||"—"}</div></div>
+              <div><div style={{ fontSize:11,color:C.soft,marginBottom:3 }}>ŹRÓDŁO</div><Pill label={order.channels?.name||"Kanał"} color={src.color} bg={src.bg} textColor={src.color}/><div style={{ fontSize:11,color:C.soft,marginTop:4,fontFamily:"monospace" }}>{order.external_id}</div></div>
+              <div><div style={{ fontSize:11,color:C.soft,marginBottom:3 }}>DOSTAWA</div><div style={{ fontSize:13,color:C.text }}>{order.carrier||"Nie wybrano"}</div>{order.tracking_number&&<div style={{ fontSize:11,color:C.soft,fontFamily:"monospace" }}>{order.tracking_number}</div>}</div>
+              <div><div style={{ fontSize:11,color:C.soft,marginBottom:3 }}>METODA PŁATNOŚCI</div><div style={{ fontSize:13,color:C.text }}>Płatność online</div></div>
+              <div><div style={{ fontSize:11,color:C.soft,marginBottom:3 }}>DATA ZAMÓWIENIA</div><div style={{ fontSize:13,color:C.text }}>{order.created_at?new Date(order.created_at).toLocaleDateString("pl-PL"):"—"}</div><div style={{ fontSize:11,color:C.soft }}>VAT: {order.vat_rate||0}%</div></div>
+            </div>
+          </Card>
+          {/* Items */}
+          <Card C={C} style={{ overflow:"hidden" }}>
+            <div style={{ padding:"14px 20px",borderBottom:`1px solid ${C.border}` }}><div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1 }}>POZYCJE ZAMÓWIENIA</div></div>
+            {items.length===0 ? <Empty text="Brak pozycji zamówienia" C={C}/> : (
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <thead><tr style={{ background:C.alt }}>{["Produkt","Ilość","Cena jedn.","Wartość"].map(h=><th key={h} style={{ padding:"9px 16px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600 }}>{h}</th>)}</tr></thead>
+                <tbody>{items.map((item,i)=>(
+                  <tr key={i} style={{ borderBottom:`1px solid ${C.borderLight}` }}>
+                    <td style={{ padding:"11px 16px",fontSize:13,fontWeight:500,color:C.text }}>{item.name||"Produkt"}</td>
+                    <td style={{ padding:"11px 16px",fontSize:13,color:C.mid }}>{item.quantity||1}</td>
+                    <td style={{ padding:"11px 16px",fontSize:13,color:C.mid,fontFamily:"monospace" }}>{parseFloat(item.price||0).toFixed(2)} {order.currency||"PLN"}</td>
+                    <td style={{ padding:"11px 16px",fontSize:14,fontWeight:700,color:C.text,fontFamily:"monospace" }}>{(parseFloat(item.price||0)*(item.quantity||1)).toFixed(2)} {order.currency||"PLN"}</td>
+                  </tr>
+                ))}</tbody>
+                <tfoot><tr style={{ background:C.alt,borderTop:`1px solid ${C.border}` }}><td colSpan={3} style={{ padding:"11px 16px",textAlign:"right",fontSize:12,fontWeight:600,color:C.soft }}>SUMA</td><td style={{ padding:"11px 16px",fontSize:16,fontWeight:800,color:C.text,fontFamily:"monospace" }}>{totalAmount.toFixed(2)} {order.currency||"PLN"}</td></tr></tfoot>
+              </table>
+            )}
+          </Card>
+          {/* Addresses */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+            <Card C={C} style={{ padding:20 }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>ADRES DOSTAWY</div>
+              <div style={{ fontSize:14,fontWeight:600,color:C.text,marginBottom:6 }}>{order.customer_name||"—"}</div>
+              <div style={{ fontSize:13,color:C.mid,lineHeight:1.9 }}>
+                <div>{order.delivery_address?.street||"ul. —"}</div>
+                <div>{order.delivery_address?.zip||"00-000"} {order.delivery_address?.city||"—"}</div>
+                <div>{order.customer_country||"PL"}</div>
+              </div>
+            </Card>
+            <Card C={C} style={{ padding:20 }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>DANE DO FAKTURY</div>
+              <div style={{ fontSize:13,color:C.mid,lineHeight:1.9 }}>
+                <div style={{ fontWeight:600,color:C.text }}>{order.invoice_data?.name||order.customer_name||"—"}</div>
+                <div>{order.invoice_data?.address||"Adres nie podany"}</div>
+                {order.invoice_data?.nip&&<div style={{ fontSize:12,color:C.soft }}>NIP: {order.invoice_data.nip}</div>}
+              </div>
+            </Card>
+          </div>
+          {/* Shipment */}
+          <Card C={C} style={{ padding:20 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:14 }}>PRZESYŁKA</div>
+            {order.tracking_number ? (
+              <div>
+                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+                  <div><div style={{ fontSize:15,fontWeight:700,color:C.text }}>{order.carrier||"Kurier"}</div><div style={{ fontSize:12,color:C.soft,fontFamily:"monospace",marginTop:2 }}>Nr: {order.tracking_number}</div></div>
+                  <Pill label="W drodze" color={C.blue} bg={C.blueBg} textColor={C.blue}/>
+                </div>
+                <div style={{ position:"relative",margin:"24px 0 8px" }}>
+                  <div style={{ position:"absolute",top:10,left:"12%",right:"12%",height:2,background:C.border,zIndex:0 }}>
+                    <div style={{ height:"100%",width:"50%",background:C.accent }}/>
+                  </div>
+                  <div style={{ display:"flex",justifyContent:"space-between",position:"relative",zIndex:1 }}>
+                    {["Nadano","W sortowni","W drodze","Dostarczone"].map((s,i)=>(
+                      <div key={s} style={{ textAlign:"center",flex:1 }}>
+                        <div style={{ width:22,height:22,borderRadius:"50%",background:i<2?C.accent:C.border,margin:"0 auto 6px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:i<2?"#fff":C.soft,fontWeight:700 }}>{i<2?"✓":""}</div>
+                        <div style={{ fontSize:10,color:i<2?C.text:C.soft,fontWeight:i<2?600:400 }}>{s}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign:"center",padding:"20px 0" }}>
+                <div style={{ fontSize:32,marginBottom:8 }}>🚚</div>
+                <div style={{ fontSize:13,color:C.soft,marginBottom:12 }}>Przesyłka nie nadana</div>
+                <button style={{ padding:"8px 18px",borderRadius:8,border:`1px solid ${C.accent}`,background:C.blueBg,color:C.accent,fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>+ Nadaj przesyłkę</button>
+              </div>
+            )}
+          </Card>
+          {/* Messages */}
+          <Card C={C} style={{ padding:20 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1 }}>WIADOMOŚCI (RESPONSO)</div>
+              <button style={{ padding:"6px 14px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit" }}>✉ Napisz wiadomość</button>
+            </div>
+            <div style={{ fontSize:13,color:C.soft,textAlign:"center",padding:"24px 0" }}>💬 Brak wiadomości z klientem</div>
+          </Card>
+        </div>
+        {/* RIGHT sidebar */}
+        <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+          <Card C={C} style={{ padding:16 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>ZMIEŃ STATUS</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:5 }}>
+              {Object.entries(STATUS_CFG).map(([k,v])=>(
+                <button key={k} onClick={()=>changeStatus(k)} disabled={order.status===k||updating} style={{ padding:"8px 12px",borderRadius:8,border:`1px solid ${order.status===k?v.dot:C.border}`,background:order.status===k?v.bg:C.surface,color:order.status===k?v.text:C.mid,fontSize:12,cursor:order.status===k||updating?"default":"pointer",fontFamily:"inherit",fontWeight:order.status===k?700:400,textAlign:"left",display:"flex",alignItems:"center",gap:7,opacity:updating?0.6:1 }}>
+                  <span style={{ width:7,height:7,borderRadius:"50%",background:v.dot,display:"block",flexShrink:0 }}/>{v.label}{order.status===k&&<span style={{ marginLeft:"auto",fontSize:10 }}>✓</span>}
+                </button>
+              ))}
+            </div>
+          </Card>
+          <Card C={C} style={{ padding:16 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>DODATKOWE INFORMACJE</div>
+            {[["ID transakcji",order.external_id||"—"],["Realizuje",order.channels?.name||"—"],["Waluta",order.currency||"PLN"],["VAT",`${order.vat_rate||0}%`],["Kraj",order.customer_country||"—"]].map(([label,value])=>(
+              <div key={label} style={{ display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`,fontSize:12 }}>
+                <span style={{ color:C.soft }}>{label}</span>
+                <span style={{ color:C.text,fontWeight:500,fontFamily:"monospace",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{value}</span>
+              </div>
+            ))}
+          </Card>
+          <Card C={C} style={{ padding:16 }}>
+            <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>HISTORIA STATUSÓW</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:10 }}>
+              {[{status:"new",date:order.created_at,label:"Zamówienie złożone"},...(order.status!=="new"?[{status:order.status,date:order.updated_at,label:STATUS_CFG[order.status]?.label||order.status}]:[])].map((h,i)=>{
+                const cfg=STATUS_CFG[h.status]||STATUS_CFG.new;
+                return (<div key={i} style={{ display:"flex",gap:8,alignItems:"flex-start" }}><div style={{ width:8,height:8,borderRadius:"50%",background:cfg.dot,marginTop:4,flexShrink:0 }}/><div><div style={{ fontSize:12,fontWeight:600,color:C.text }}>{h.label}</div><div style={{ fontSize:10,color:C.soft }}>{h.date?new Date(h.date).toLocaleString("pl-PL"):""}</div></div></div>);
+              })}
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── ORDERS TAB ─────────────────────────────────────────────
 const OrdersTab = ({ subTab, isMobile, C }) => {
   const [orders,setOrders]=useState([]);
   const [loading,setLoading]=useState(true);
   const [selected,setSelected]=useState(null);
+  const [detailOrder,setDetailOrder]=useState(null);
   const [fStatus,setFStatus]=useState("all");
   const [fSource,setFSource]=useState("all");
   const [updating,setUpdating]=useState(null);
@@ -644,6 +833,8 @@ const OrdersTab = ({ subTab, isMobile, C }) => {
 
   const subLabels={"orders-invoices":"Faktury","orders-returns":"Zwroty","orders-clients":"Klienci","orders-statuses":"Statusy zamówień","orders-templates":"Szablony E-mail/SMS","orders-actions":"Automatyczne akcje","orders-exports":"Wydruki i eksporty","orders-imports":"Import przelewów","orders-settings":"Ustawienia"};
   if(subTab&&subTab!=="orders-list") return <ComingSoon title={subLabels[subTab]||subTab} C={C}/>;
+
+  if(detailOrder) return <OrderDetailView order={detailOrder} orders={orders.filter(o=>fSource==="all"||o.channels?.type===fSource)} onBack={()=>setDetailOrder(null)} C={C} onStatusUpdate={(id,status)=>{ setOrders(prev=>prev.map(o=>o.id===id?{...o,status}:o)); }}/>;
 
   const filtered=orders.filter(o=>fSource==="all"||o.channels?.type===fSource);
   const sel={style:{background:C.surface,color:C.text,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",cursor:"pointer",outline:"none"}};
@@ -709,9 +900,9 @@ const OrdersTab = ({ subTab, isMobile, C }) => {
                   <td style={{ padding:"14px 16px" }}><div style={{ fontSize:15,fontWeight:700,color:C.text,fontFamily:"monospace" }}>{parseFloat(o.total_amount||0).toFixed(2)}</div><div style={{ fontSize:11,color:C.soft }}>{o.currency||"PLN"}</div></td>
                   <td style={{ padding:"14px 16px" }}><Pill label={st.label} color={st.dot} bg={st.bg} textColor={st.text} dot={true}/></td>
                   <td style={{ padding:"14px 16px",fontSize:13,color:C.soft }}>{o.created_at?new Date(o.created_at).toLocaleDateString("pl-PL"):"—"}</td>
-                  <td style={{ padding:"14px 16px" }}><button onClick={()=>setSelected(isOpen?null:o.id)} style={{ padding:"6px 14px",borderRadius:7,border:`1px solid ${C.border}`,background:isOpen?C.accent:C.surface,color:isOpen?"#fff":C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit" }}>{isOpen?"Zamknij":"Szczegóły"}</button></td>
+                  <td style={{ padding:"14px 16px" }}><button onClick={()=>setDetailOrder(o)} style={{ padding:"6px 14px",borderRadius:7,border:"none",background:C.accent,color:"#fff",fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>→ Szczegóły</button></td>
                 </tr>,
-                isOpen&&<tr key={`${o.id}-d`}><td colSpan={6} style={{ padding:"0 16px 16px",background:`${C.accent}08`,borderBottom:`1px solid ${C.border}` }}><div style={{ padding:"16px",background:C.surface,borderRadius:10,border:`1px solid ${C.border}`,marginTop:8 }}><div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}><div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>KLIENT</div><div style={{ fontSize:14,fontWeight:600,color:C.text }}>{o.customer_name}</div><div style={{ fontSize:12,color:C.soft }}>{o.customer_email}</div><div style={{ fontSize:12,color:C.soft }}>{o.customer_country}</div></div><div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>ZAMÓWIENIE</div><div style={{ fontSize:12,color:C.mid }}>ID: {o.external_id||o.id?.slice(0,16)}</div>{o.receipt_number&&<div style={{ fontSize:12,color:C.mid }}>Paragon: {o.receipt_number}</div>}</div></div><div style={{ fontSize:12,color:C.soft,marginBottom:10 }}>Zmień status:</div><div style={{ display:"flex",gap:8,flexWrap:"wrap" }}>{Object.entries(STATUS_CFG).map(([k,v])=><button key={k} onClick={()=>updateStatus(o.id,k)} disabled={o.status===k||updating===o.id} style={{ padding:"8px 16px",borderRadius:8,fontSize:13,fontWeight:500,cursor:o.status===k?"default":"pointer",border:`1px solid ${o.status===k?v.dot:C.border}`,background:o.status===k?v.bg:C.surface,color:o.status===k?v.text:C.mid,fontFamily:"inherit",opacity:updating===o.id?0.6:1 }}>{v.label}</button>)}</div></div></td></tr>
+                null
               ];
             })}
           </tbody>
@@ -753,20 +944,49 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+lines.join("\n")],{type:"text/csv;charset=utf-8"}));a.download="fruttino_master_template.csv";a.click();
   };
 
-  if(subTab==="products-import") return (
+  if(subTab==="products-import") {
+    const [importFile,setImportFile]=useState(null);
+    const [importing,setImporting]=useState(false);
+    const [importResult,setImportResult]=useState(null);
+    const [isDragging,setIsDragging]=useState(false);
+    const fileInputRef=useRef(null);
+    const handleFileDrop=(file)=>{ if(!file) return; if(!file.name.match(/\.(csv)$/i)){alert("Proszę wybrać plik .CSV");return;} setImportFile(file);setImportResult(null); };
+    const importCSV=async()=>{
+      if(!importFile) return; setImporting(true);
+      try {
+        const text=await importFile.text();
+        const lines=text.split("\n").filter(l=>l.trim()&&!l.startsWith("#"));
+        if(lines.length<2){alert("Plik jest pusty lub zawiera tylko nagłówki");setImporting(false);return;}
+        const headers=lines[0].split(",").map(h=>h.trim().replace("*","").replace(/\uFEFF/g,""));
+        const rows=lines.slice(1).map(line=>{const vals=line.split(",");const obj={};headers.forEach((h,i)=>{if(vals[i]!==undefined)obj[h]=vals[i].trim();});return obj;}).filter(p=>p.sku&&p.name&&p.price);
+        let success=0,errors=0;
+        for(const p of rows){
+          const payload={...p,price:parseFloat(p.price)||0,vat_rate:p.vat_rate||"23",tenant_id:TENANT_ID,initial_quantity:parseInt(p.initial_quantity)||0};
+          const res=await apiFetch("/products",{method:"POST",body:JSON.stringify(payload)});
+          if(res.success||res.id) success++; else errors++;
+        }
+        setImportResult({success,errors,total:rows.length});
+        if(success>0) load();
+      } catch(e){alert("Błąd parsowania: "+e.message);}
+      setImporting(false);
+    };
+    return (
     <div>
       <h2 style={{ fontSize:20,fontWeight:700,color:C.text,marginBottom:20 }}>Import / Eksport katalogu</h2>
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:20 }}>
         <Card C={C} style={{ padding:24 }}>
           <div style={{ fontSize:32,marginBottom:12 }}>📥</div>
           <h3 style={{ fontSize:16,fontWeight:700,color:C.text,marginBottom:8 }}>Import produktów</h3>
-          <p style={{ fontSize:13,color:C.soft,marginBottom:16,lineHeight:1.6 }}>Załaduj plik CSV lub XLSX z produktami. System automatycznie utworzy lub zaktualizuje karty produktów.</p>
-          <div style={{ border:`2px dashed ${C.border}`,borderRadius:10,padding:24,textAlign:"center",marginBottom:16,background:C.alt,cursor:"pointer" }}>
-            <div style={{ fontSize:28,marginBottom:8 }}>📂</div>
-            <div style={{ fontSize:13,color:C.mid,marginBottom:4 }}>Przeciągnij plik lub kliknij aby wybrać</div>
-            <div style={{ fontSize:11,color:C.soft }}>CSV, XLSX — maks. 5000 produktów</div>
+          <p style={{ fontSize:13,color:C.soft,marginBottom:16,lineHeight:1.6 }}>Załaduj plik CSV z produktami. System automatycznie utworzy lub zaktualizuje karty produktów.</p>
+          <div onDragOver={e=>{e.preventDefault();setIsDragging(true);}} onDragLeave={()=>setIsDragging(false)} onDrop={e=>{e.preventDefault();setIsDragging(false);handleFileDrop(e.dataTransfer.files[0]);}} onClick={()=>fileInputRef.current?.click()} style={{ border:`2px dashed ${isDragging?C.accent:C.border}`,borderRadius:10,padding:24,textAlign:"center",marginBottom:16,background:isDragging?C.blueBg:C.alt,cursor:"pointer",transition:"all 0.2s" }}>
+            {importFile ? <><div style={{ fontSize:28,marginBottom:6 }}>📄</div><div style={{ fontSize:14,fontWeight:600,color:C.text,marginBottom:2 }}>{importFile.name}</div><div style={{ fontSize:11,color:C.soft }}>{(importFile.size/1024).toFixed(0)} KB — kliknij aby zmienić</div></> : <><div style={{ fontSize:28,marginBottom:8 }}>📂</div><div style={{ fontSize:13,color:C.mid,marginBottom:4 }}>Przeciągnij plik lub kliknij aby wybrać</div><div style={{ fontSize:11,color:C.soft }}>CSV — maks. 5000 produktów</div></>}
           </div>
-          <button onClick={downloadTemplate} style={{ width:"100%",padding:10,borderRadius:8,border:`1px solid ${C.accent}`,background:C.blueBg,color:C.accent,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>📋 Pobierz plik wzorcowy (master template)</button>
+          <input ref={fileInputRef} type="file" accept=".csv" style={{ display:"none" }} onChange={e=>handleFileDrop(e.target.files[0])}/>
+          {importResult&&<div style={{ padding:"10px 14px",borderRadius:8,background:importResult.errors===0?C.greenBg:C.amberBg,color:importResult.errors===0?"#065f46":"#92400e",fontSize:13,fontWeight:600,marginBottom:12 }}>{importResult.errors===0?"✅":"⚠️"} Zaimportowano {importResult.success}/{importResult.total} produktów{importResult.errors>0&&` (${importResult.errors} błędów)`}</div>}
+          <div style={{ display:"flex",gap:8 }}>
+            <button onClick={downloadTemplate} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.accent}`,background:C.blueBg,color:C.accent,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>📋 Pobierz szablon</button>
+            <button onClick={importCSV} disabled={!importFile||importing} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:importFile?C.accent:C.border,color:"#fff",fontSize:13,fontWeight:600,cursor:importFile&&!importing?"pointer":"not-allowed",fontFamily:"inherit",opacity:importing?0.7:1 }}>{importing?"⏳ Importuję...":"⬆ Importuj plik"}</button>
+          </div>
         </Card>
         <Card C={C} style={{ padding:24 }}>
           <div style={{ fontSize:32,marginBottom:12 }}>📤</div>
@@ -795,7 +1015,8 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
         </table>
       </Card>
     </div>
-  );
+    );
+  }
 
   if(subTab&&!["products-list","products-import"].includes(subTab)) return <ComingSoon title={subTab} C={C}/>;
 
@@ -1156,6 +1377,146 @@ const CouriersTab = ({ isMobile, C }) => {
   );
 };
 
+// ── DELIVERIES TAB ─────────────────────────────────────────
+const DeliveriesTab = ({ C }) => {
+  const [deliveries,setDeliveries]=useState(MOCK_DELIVERIES);
+  const [selected,setSelected]=useState(null);
+  const [fStatus,setFStatus]=useState("all");
+  const [receiving,setReceiving]=useState(null);
+  const [receiveData,setReceiveData]=useState({});
+  const [showNewModal,setShowNewModal]=useState(false);
+  const [newDel,setNewDel]=useState({ supplier:"", country:"PL", tracking:"", carrier:"DHL", amount:"", status:"pending", products:[{name:"",qty_expected:1,ean:""}] });
+  const filtered=fStatus==="all"?deliveries:deliveries.filter(d=>d.status===fStatus);
+  const sel={style:{background:C.surface,color:C.text,border:`1px solid ${C.border}`,borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",cursor:"pointer",outline:"none"}};
+  const totalItems=(d)=>d.products.reduce((s,p)=>s+p.qty_expected,0);
+  const addDelivery=()=>{
+    const d={...newDel,id:`DEL-${String(deliveries.length+1).padStart(3,"0")}`,amount:parseFloat(newDel.amount)||0,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+    setDeliveries(prev=>[d,...prev]);setShowNewModal(false);setNewDel({supplier:"",country:"PL",tracking:"",carrier:"DHL",amount:"",status:"pending",products:[{name:"",qty_expected:1,ean:""}]});
+  };
+  return (
+    <div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Dostawy — Przyjęcia towarów</h2>
+        <div style={{ display:"flex",gap:10 }}>
+          <select {...sel} value={fStatus} onChange={e=>setFStatus(e.target.value)}>
+            <option value="all">Wszystkie statusy</option>
+            {Object.entries(DELIVERY_STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <button onClick={()=>setShowNewModal(true)} style={{ padding:"8px 20px",borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>+ Nowe przyjęcie</button>
+        </div>
+      </div>
+      {/* Summary badges */}
+      <div style={{ display:"flex",gap:10,marginBottom:20 }}>
+        {Object.entries(DELIVERY_STATUS).map(([k,v])=>{const count=deliveries.filter(d=>d.status===k).length;return(<div key={k} style={{ padding:"8px 16px",borderRadius:9,background:v.bg,border:`1px solid ${v.dot}33`,fontSize:13,fontWeight:600,color:v.text,display:"flex",alignItems:"center",gap:6 }}><span style={{ width:7,height:7,borderRadius:"50%",background:v.dot,display:"block" }}/>{v.label}: {count}</div>);})}
+      </div>
+      <Card C={C} style={{ overflow:"hidden" }}>
+        <table style={{ width:"100%",borderCollapse:"collapse" }}>
+          <thead><tr style={{ background:C.alt,borderBottom:`1px solid ${C.border}` }}>
+            {["# Numer","Dostawca","Produkty","Dostawa","Kwota","Status","Data","Akcje"].map(h=><th key={h} style={{ padding:"12px 16px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600,letterSpacing:0.8 }}>{h.toUpperCase()}</th>)}
+          </tr></thead>
+          <tbody>
+            {filtered.length===0?<tr><td colSpan={8}><Empty text="Brak dochodząc towarów" C={C}/></td></tr>:filtered.map((d,i)=>{
+              const st=DELIVERY_STATUS[d.status]||DELIVERY_STATUS.pending;const isOpen=selected===d.id;
+              return [
+                <tr key={d.id} style={{ borderBottom:`1px solid ${C.borderLight}`,background:isOpen?`${C.accent}08`:i%2===0?C.surface:C.alt }}>
+                  <td style={{ padding:"14px 16px",fontFamily:"monospace",fontSize:12,fontWeight:700,color:C.accent }}>{d.id}</td>
+                  <td style={{ padding:"14px 16px" }}>
+                    <div style={{ display:"flex",alignItems:"center",gap:6 }}><span style={{ fontSize:18 }}>{COUNTRY_FLAGS[d.country]||"🌍"}</span><div><div style={{ fontSize:13,fontWeight:600,color:C.text }}>{d.supplier}</div><div style={{ fontSize:11,color:C.soft }}>{d.country}</div></div></div>
+                  </td>
+                  <td style={{ padding:"14px 16px" }}>
+                    <div style={{ fontSize:13,color:C.text }}>{d.products[0]?.name}{d.products.length>1&&<span style={{ fontSize:11,color:C.soft }}> +{d.products.length-1} więcej</span>}</div>
+                    <div style={{ fontSize:11,color:C.soft }}>{totalItems(d)} szt. łącznie</div>
+                  </td>
+                  <td style={{ padding:"14px 16px" }}>{d.tracking?<div><div style={{ fontSize:12,color:C.text,fontFamily:"monospace" }}>{d.tracking}</div><div style={{ fontSize:11,color:C.soft }}>{d.carrier}</div></div>:<span style={{ fontSize:12,color:C.soft }}>—</span>}</td>
+                  <td style={{ padding:"14px 16px",fontFamily:"monospace",fontSize:14,fontWeight:700,color:C.text }}>{d.amount.toFixed(2)} PLN</td>
+                  <td style={{ padding:"14px 16px" }}><Pill label={st.label} color={st.dot} bg={st.bg} textColor={st.text} dot={true}/></td>
+                  <td style={{ padding:"14px 16px",fontSize:12,color:C.soft }}>{new Date(d.created_at).toLocaleDateString("pl-PL")}</td>
+                  <td style={{ padding:"14px 16px" }}>
+                    <div style={{ display:"flex",gap:5 }}>
+                      <button onClick={()=>setSelected(isOpen?null:d.id)} style={{ padding:"5px 10px",borderRadius:6,border:`1px solid ${C.border}`,background:isOpen?C.accent:C.surface,color:isOpen?"#fff":C.mid,fontSize:11,cursor:"pointer",fontFamily:"inherit" }}>{isOpen?"↑":"↓ Szczegóły"}</button>
+                      {(d.status==="transit"||d.status==="pending")&&<button onClick={()=>{setReceiving(d);setReceiveData(Object.fromEntries(d.products.map(p=>[p.ean,p.qty_expected])));}} style={{ padding:"5px 10px",borderRadius:6,border:"none",background:C.green,color:"#fff",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>$ Przyjmij</button>}
+                    </div>
+                  </td>
+                </tr>,
+                isOpen&&<tr key={`${d.id}-det`}><td colSpan={8} style={{ padding:"0 16px 16px",background:`${C.accent}06`,borderBottom:`1px solid ${C.border}` }}>
+                  <div style={{ padding:16,background:C.surface,borderRadius:10,border:`1px solid ${C.border}`,marginTop:8 }}>
+                    <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:10 }}>LISTA PRODUKTÓW</div>
+                    <table style={{ width:"100%",borderCollapse:"collapse",marginBottom:16 }}>
+                      <thead><tr style={{ background:C.alt }}>{["Produkt","EAN","Oczekiwano","Przyjęto","Różnica"].map(h=><th key={h} style={{ padding:"7px 12px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600 }}>{h}</th>)}</tr></thead>
+                      <tbody>{d.products.map((p,pi)=>{const diff=p.qty_received-p.qty_expected;return(
+                        <tr key={pi} style={{ borderBottom:`1px solid ${C.borderLight}` }}>
+                          <td style={{ padding:"9px 12px",fontSize:13,color:C.text,fontWeight:500 }}>{p.name}</td>
+                          <td style={{ padding:"9px 12px",fontSize:11,color:C.soft,fontFamily:"monospace" }}>{p.ean}</td>
+                          <td style={{ padding:"9px 12px",fontSize:13,color:C.mid }}>{p.qty_expected}</td>
+                          <td style={{ padding:"9px 12px",fontSize:13,fontWeight:700,color:d.status==="delivered"?C.green:C.soft }}>{d.status==="delivered"?p.qty_received:"—"}</td>
+                          <td style={{ padding:"9px 12px",fontSize:13,fontWeight:700,color:diff>0?C.green:diff<0?C.red:C.mid }}>{d.status==="delivered"?(diff>0?`+${diff}`:diff<0?`${diff}`:"✓ OK"):"—"}</td>
+                        </tr>
+                      );})}</tbody>
+                    </table>
+                    <div style={{ display:"flex",gap:24,fontSize:12,color:C.mid }}>
+                      <div><span style={{ color:C.soft }}>Utworzono: </span>{new Date(d.created_at).toLocaleString("pl-PL")}</div>
+                      <div><span style={{ color:C.soft }}>Ostatnia zmiana: </span>{new Date(d.updated_at).toLocaleString("pl-PL")}</div>
+                    </div>
+                  </div>
+                </td></tr>
+              ];
+            })}
+          </tbody>
+        </table>
+      </Card>
+      {/* Receive modal */}
+      {receiving&&(
+        <Modal title={`Przyjmij towar — ${receiving.id}`} onClose={()=>setReceiving(null)} C={C}>
+          <div style={{ marginBottom:16,padding:"10px 14px",background:C.blueBg,borderRadius:8,fontSize:13,color:C.blue }}>📦 Zatwierdź przyjęcie towaru od: <strong>{receiving.supplier}</strong></div>
+          {receiving.products.map(p=>(
+            <div key={p.ean} style={{ marginBottom:14,padding:"12px",background:C.alt,borderRadius:9,border:`1px solid ${C.border}` }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8 }}>
+                <div style={{ fontSize:13,fontWeight:600,color:C.text }}>{p.name}</div>
+                <div style={{ fontSize:11,color:C.soft,fontFamily:"monospace" }}>{p.ean}</div>
+              </div>
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+                <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>Oczekiwano</div><div style={{ fontSize:20,fontWeight:800,color:C.mid,fontFamily:"monospace" }}>{p.qty_expected}</div></div>
+                <div>
+                  <div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>Przyjęto faktycznie</div>
+                  <input type="number" value={receiveData[p.ean]??p.qty_expected} onChange={e=>setReceiveData(prev=>({...prev,[p.ean]:parseInt(e.target.value)||0}))} style={{ width:"100%",padding:"7px 10px",borderRadius:7,border:`1px solid ${C.accent}`,fontSize:16,fontWeight:700,fontFamily:"monospace",background:C.surface,color:C.text,outline:"none",boxSizing:"border-box" }}/>
+                </div>
+              </div>
+            </div>
+          ))}
+          <div style={{ display:"flex",gap:10,marginTop:16 }}>
+            <button onClick={()=>setReceiving(null)} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Anuluj</button>
+            <button onClick={()=>{setDeliveries(prev=>prev.map(d=>d.id===receiving.id?{...d,status:"delivered",updated_at:new Date().toISOString(),products:d.products.map(p=>({...p,qty_received:receiveData[p.ean]??p.qty_expected}))}:d));setReceiving(null);}} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.green,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>✅ Zatwierdź przyjęcie towaru</button>
+          </div>
+        </Modal>
+      )}
+      {/* New delivery modal */}
+      {showNewModal&&(
+        <Modal title="Nowe przyjęcie towaru" onClose={()=>setShowNewModal(false)} C={C} width={560}>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16 }}>
+            {[{key:"supplier",label:"Dostawca *",ph:"Nazwa firmy"},{key:"country",label:"Kraj",ph:"PL"},{key:"tracking",label:"Nr listu przewozowego",ph:"PC123456789PL"},{key:"carrier",label:"Przewoźnik",ph:"DHL"},{key:"amount",label:"Kwota (PLN)",ph:"1500.00"}].map(f=>(
+              <div key={f.key}><div style={{ fontSize:11,fontWeight:600,color:C.soft,marginBottom:5 }}>{f.label}</div><input value={newDel[f.key]} onChange={e=>setNewDel({...newDel,[f.key]:e.target.value})} placeholder={f.ph} style={{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none",boxSizing:"border-box" }}/></div>
+            ))}
+          </div>
+          <div style={{ fontSize:11,fontWeight:600,color:C.soft,marginBottom:8 }}>PRODUKTY</div>
+          {newDel.products.map((p,i)=>(
+            <div key={i} style={{ display:"grid",gridTemplateColumns:"2fr 1fr 1.5fr auto",gap:8,marginBottom:8 }}>
+              <input value={p.name} onChange={e=>{const pr=[...newDel.products];pr[i]={...pr[i],name:e.target.value};setNewDel({...newDel,products:pr});}} placeholder="Nazwa produktu" style={{ padding:"8px 10px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none" }}/>
+              <input type="number" value={p.qty_expected} onChange={e=>{const pr=[...newDel.products];pr[i]={...pr[i],qty_expected:parseInt(e.target.value)||1};setNewDel({...newDel,products:pr});}} placeholder="Ilość" style={{ padding:"8px 10px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"monospace",background:C.surface,color:C.text,outline:"none" }}/>
+              <input value={p.ean} onChange={e=>{const pr=[...newDel.products];pr[i]={...pr[i],ean:e.target.value};setNewDel({...newDel,products:pr});}} placeholder="EAN" style={{ padding:"8px 10px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"monospace",background:C.surface,color:C.text,outline:"none" }}/>
+              <button onClick={()=>setNewDel({...newDel,products:newDel.products.filter((_,j)=>j!==i)})} style={{ width:32,borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.red,cursor:"pointer",fontSize:14 }}>✕</button>
+            </div>
+          ))}
+          <button onClick={()=>setNewDel({...newDel,products:[...newDel.products,{name:"",qty_expected:1,ean:""}]})} style={{ width:"100%",padding:"7px",borderRadius:7,border:`1px dashed ${C.border}`,background:C.alt,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit",marginBottom:16 }}>+ Dodaj produkt</button>
+          <div style={{ display:"flex",gap:10 }}>
+            <button onClick={()=>setShowNewModal(false)} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Anuluj</button>
+            <button onClick={addDelivery} disabled={!newDel.supplier} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:newDel.supplier?"pointer":"not-allowed",fontFamily:"inherit",opacity:newDel.supplier?1:0.5 }}>💾 Zapisz przyjęcie</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 // ── ANALYTICS ──────────────────────────────────────────────
 const AnalyticsTab = ({ stats, user, isMobile, C }) => (
   <div style={{ display:"flex",flexDirection:"column",gap:isMobile?12:20 }}>
@@ -1244,6 +1605,7 @@ export default function App() {
     if(tab==="products")   return <ProductsTab subTab={subTab||"products-list"} isMobile={mobile} C={C}/>;
     if(tab==="channels")   return <ChannelsTab isMobile={mobile} C={C}/>;
     if(tab==="couriers")   return <CouriersTab isMobile={mobile} C={C}/>;
+    if(tab==="deliveries") return <DeliveriesTab C={C}/>;
     if(tab==="analytics")  return <AnalyticsTab stats={stats} user={session.user} isMobile={mobile} C={C}/>;
     return null;
   };
