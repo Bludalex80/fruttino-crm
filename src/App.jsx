@@ -1022,6 +1022,13 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
 
   useEffect(()=>{load();},[load]);
 
+  const exportCSV=()=>{
+    const headers=["sku*","name*","price*","vat_rate","initial_quantity","brand","weight_kg","description","ean","category","sklad","kraj_pochodzenia","alergeny","stan","dostawa_dni"];
+    const rows=products.map(p=>[p.sku,p.name,p.price,p.vat_rate,"",p.brand||"",p.weight_kg||"",p.description||"","","","","","","nowy",""]);
+    const csv="\uFEFF"+[headers,...rows].map(r=>r.join(",")).join("\n");
+    const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download="fruttino_katalog.csv";a.click();
+  };
+
   if(subTab==="products-import") return <ProductImportTab products={products} onReload={load} C={C}/>;
 
   if(subTab&&!["products-list","products-import"].includes(subTab)) return <ComingSoon title={subTab} C={C}/>;
