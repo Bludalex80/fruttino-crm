@@ -934,6 +934,19 @@ const ProductImportTab = ({ products, onReload, C }) => {
 
   const handleFileDrop=(file)=>{ if(!file) return; if(!file.name.match(/\.(csv)$/i)){alert("Proszę wybrać plik .CSV");return;} setImportFile(file);setImportResult(null); };
 
+  const translateApiError=(raw="")=>{
+    const s=String(raw).toLowerCase();
+    if(s.includes("duplicate")||s.includes("unique")||s.includes("already exists")||s.includes("conflict")) return "Produkt z tym SKU już istnieje w bazie";
+    if(s.includes("not null")||s.includes("required")||s.includes("missing")) return "Brak wymaganego pola (SKU, nazwa lub cena)";
+    if(s.includes("invalid input")||s.includes("syntax")||s.includes("numeric")||s.includes("type")) return "Nieprawidłowy format danych (sprawdź cenę lub VAT)";
+    if(s.includes("unauthorized")||s.includes("401")||s.includes("403")||s.includes("forbidden")) return "Brak uprawnień — sprawdź klucz API";
+    if(s.includes("not found")||s.includes("404")) return "Nie znaleziono zasobu";
+    if(s.includes("timeout")||s.includes("network")||s.includes("fetch")) return "Błąd połączenia z serwerem";
+    if(s.includes("too large")||s.includes("payload")) return "Plik jest za duży";
+    if(raw&&raw.length<120) return raw;
+    return "Nieznany błąd serwera";
+  };
+
   const importCSV=async()=>{
     if(!importFile) return; setImporting(true);
     try {
@@ -942,13 +955,14 @@ const ProductImportTab = ({ products, onReload, C }) => {
       if(lines.length<2){alert("Plik jest pusty lub zawiera tylko nagłówki");setImporting(false);return;}
       const headers=lines[0].split(",").map(h=>h.trim().replace("*","").replace(/\uFEFF/g,""));
       const rows=lines.slice(1).map(line=>{const vals=line.split(",");const obj={};headers.forEach((h,i)=>{if(vals[i]!==undefined)obj[h]=vals[i].trim();});return obj;}).filter(p=>p.sku&&p.name&&p.price);
-      let success=0,errors=0;
+      let success=0; const errorDetails=[];
       for(const p of rows){
-        const payload={...p,price:parseFloat(p.price)||0,vat_rate:p.vat_rate||"23",tenant_id:TENANT_ID,initial_quantity:parseInt(p.initial_quantity)||0};
+        const payload={...p,price:parseFloat(p.price)||0,vat_rate:p.vat_rate?parseInt(p.vat_rate):23,tenant_id:TENANT_ID,initial_quantity:parseInt(p.initial_quantity)||0,weight_kg:p.weight_kg?parseFloat(p.weight_kg):null,dostawa_dni:p.dostawa_dni?parseInt(p.dostawa_dni):null};
         const res=await apiFetch("/products",{method:"POST",body:JSON.stringify(payload)});
-        if(res.success||res.id) success++; else errors++;
+        if(res.success||res.id) success++;
+        else errorDetails.push({sku:p.sku, msg: translateApiError(res.error||res.message||res.details||JSON.stringify(res))});
       }
-      setImportResult({success,errors,total:rows.length});
+      setImportResult({success,errors:errorDetails.length,total:rows.length,errorDetails});
       if(success>0) onReload();
     } catch(e){alert("Błąd parsowania: "+e.message);}
     setImporting(false);
@@ -966,7 +980,12 @@ const ProductImportTab = ({ products, onReload, C }) => {
             {importFile ? <><div style={{ fontSize:28,marginBottom:6 }}>📄</div><div style={{ fontSize:14,fontWeight:600,color:C.text,marginBottom:2 }}>{importFile.name}</div><div style={{ fontSize:11,color:C.soft }}>{(importFile.size/1024).toFixed(0)} KB — kliknij aby zmienić</div></> : <><div style={{ fontSize:28,marginBottom:8 }}>📂</div><div style={{ fontSize:13,color:C.mid,marginBottom:4 }}>Przeciągnij plik lub kliknij aby wybrać</div><div style={{ fontSize:11,color:C.soft }}>CSV — maks. 5000 produktów</div></>}
           </div>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display:"none" }} onChange={e=>handleFileDrop(e.target.files[0])}/>
-          {importResult&&<div style={{ padding:"10px 14px",borderRadius:8,background:importResult.errors===0?C.greenBg:C.amberBg,color:importResult.errors===0?"#065f46":"#92400e",fontSize:13,fontWeight:600,marginBottom:12 }}>{importResult.errors===0?"✅":"⚠️"} Zaimportowano {importResult.success}/{importResult.total} produktów{importResult.errors>0&&` (${importResult.errors} błędów)`}</div>}
+          {importResult&&<div style={{ borderRadius:8,background:importResult.errors===0?C.greenBg:C.amberBg,marginBottom:12,overflow:"hidden" }}>
+            <div style={{ padding:"10px 14px",color:importResult.errors===0?"#065f46":"#92400e",fontSize:13,fontWeight:600 }}>{importResult.errors===0?"✅":"⚠️"} Zaimportowano {importResult.success}/{importResult.total} produktów{importResult.errors>0&&` (${importResult.errors} błędów)`}</div>
+            {importResult.errorDetails?.length>0&&<div style={{ borderTop:"1px solid rgba(0,0,0,0.1)",padding:"8px 14px",maxHeight:160,overflowY:"auto" }}>
+              {importResult.errorDetails.map((e,i)=><div key={i} style={{ fontSize:12,color:"#92400e",marginBottom:4,fontFamily:"monospace" }}>❌ SKU <strong>{e.sku}</strong>: {e.msg}</div>)}
+            </div>}
+          </div>}
           <div style={{ display:"flex",gap:8 }}>
             <button onClick={downloadTemplate} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.accent}`,background:C.blueBg,color:C.accent,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>📋 Pobierz szablon</button>
             <button onClick={importCSV} disabled={!importFile||importing} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:importFile?C.accent:C.border,color:"#fff",fontSize:13,fontWeight:600,cursor:importFile&&!importing?"pointer":"not-allowed",fontFamily:"inherit",opacity:importing?0.7:1 }}>{importing?"⏳ Importuję...":"⬆ Importuj plik"}</button>
