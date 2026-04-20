@@ -912,25 +912,13 @@ const OrdersTab = ({ subTab, isMobile, C }) => {
   );
 };
 
-// ── PRODUCTS TAB ───────────────────────────────────────────
-const ProductsTab = ({ subTab, isMobile, C }) => {
-  const [products,setProducts]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const [editProduct,setEditProduct]=useState(null);
-  const [showNewForm,setShowNewForm]=useState(false);
-  const [search,setSearch]=useState("");
-  const [error,setError]=useState("");
-
-  const load=useCallback(async()=>{
-    setLoading(true);setError("");
-    const p=new URLSearchParams({tenant_id:TENANT_ID});
-    if(search) p.set("search",search);
-    const res=await apiFetch(`/products?${p}`);
-    if(res.success) setProducts(res.data||[]); else setError(res.error);
-    setLoading(false);
-  },[search]);
-
-  useEffect(()=>{load();},[load]);
+// ── PRODUCT IMPORT TAB ─────────────────────────────────────
+const ProductImportTab = ({ products, onReload, C }) => {
+  const [importFile,setImportFile]=useState(null);
+  const [importing,setImporting]=useState(false);
+  const [importResult,setImportResult]=useState(null);
+  const [isDragging,setIsDragging]=useState(false);
+  const fileInputRef=useRef(null);
 
   const exportCSV=()=>{
     const headers=["sku*","name*","price*","vat_rate","initial_quantity","brand","weight_kg","description","ean","category","sklad","kraj_pochodzenia","alergeny","stan","dostawa_dni"];
@@ -944,33 +932,29 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
     const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+lines.join("\n")],{type:"text/csv;charset=utf-8"}));a.download="fruttino_master_template.csv";a.click();
   };
 
-  if(subTab==="products-import") {
-    const [importFile,setImportFile]=useState(null);
-    const [importing,setImporting]=useState(false);
-    const [importResult,setImportResult]=useState(null);
-    const [isDragging,setIsDragging]=useState(false);
-    const fileInputRef=useRef(null);
-    const handleFileDrop=(file)=>{ if(!file) return; if(!file.name.match(/\.(csv)$/i)){alert("Proszę wybrać plik .CSV");return;} setImportFile(file);setImportResult(null); };
-    const importCSV=async()=>{
-      if(!importFile) return; setImporting(true);
-      try {
-        const text=await importFile.text();
-        const lines=text.split("\n").filter(l=>l.trim()&&!l.startsWith("#"));
-        if(lines.length<2){alert("Plik jest pusty lub zawiera tylko nagłówki");setImporting(false);return;}
-        const headers=lines[0].split(",").map(h=>h.trim().replace("*","").replace(/\uFEFF/g,""));
-        const rows=lines.slice(1).map(line=>{const vals=line.split(",");const obj={};headers.forEach((h,i)=>{if(vals[i]!==undefined)obj[h]=vals[i].trim();});return obj;}).filter(p=>p.sku&&p.name&&p.price);
-        let success=0,errors=0;
-        for(const p of rows){
-          const payload={...p,price:parseFloat(p.price)||0,vat_rate:p.vat_rate||"23",tenant_id:TENANT_ID,initial_quantity:parseInt(p.initial_quantity)||0};
-          const res=await apiFetch("/products",{method:"POST",body:JSON.stringify(payload)});
-          if(res.success||res.id) success++; else errors++;
-        }
-        setImportResult({success,errors,total:rows.length});
-        if(success>0) load();
-      } catch(e){alert("Błąd parsowania: "+e.message);}
-      setImporting(false);
-    };
-    return (
+  const handleFileDrop=(file)=>{ if(!file) return; if(!file.name.match(/\.(csv)$/i)){alert("Proszę wybrać plik .CSV");return;} setImportFile(file);setImportResult(null); };
+
+  const importCSV=async()=>{
+    if(!importFile) return; setImporting(true);
+    try {
+      const text=await importFile.text();
+      const lines=text.split("\n").filter(l=>l.trim()&&!l.startsWith("#"));
+      if(lines.length<2){alert("Plik jest pusty lub zawiera tylko nagłówki");setImporting(false);return;}
+      const headers=lines[0].split(",").map(h=>h.trim().replace("*","").replace(/\uFEFF/g,""));
+      const rows=lines.slice(1).map(line=>{const vals=line.split(",");const obj={};headers.forEach((h,i)=>{if(vals[i]!==undefined)obj[h]=vals[i].trim();});return obj;}).filter(p=>p.sku&&p.name&&p.price);
+      let success=0,errors=0;
+      for(const p of rows){
+        const payload={...p,price:parseFloat(p.price)||0,vat_rate:p.vat_rate||"23",tenant_id:TENANT_ID,initial_quantity:parseInt(p.initial_quantity)||0};
+        const res=await apiFetch("/products",{method:"POST",body:JSON.stringify(payload)});
+        if(res.success||res.id) success++; else errors++;
+      }
+      setImportResult({success,errors,total:rows.length});
+      if(success>0) onReload();
+    } catch(e){alert("Błąd parsowania: "+e.message);}
+    setImporting(false);
+  };
+
+  return (
     <div>
       <h2 style={{ fontSize:20,fontWeight:700,color:C.text,marginBottom:20 }}>Import / Eksport katalogu</h2>
       <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginBottom:20 }}>
@@ -1015,8 +999,30 @@ const ProductsTab = ({ subTab, isMobile, C }) => {
         </table>
       </Card>
     </div>
-    );
-  }
+  );
+};
+
+// ── PRODUCTS TAB ───────────────────────────────────────────
+const ProductsTab = ({ subTab, isMobile, C }) => {
+  const [products,setProducts]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [editProduct,setEditProduct]=useState(null);
+  const [showNewForm,setShowNewForm]=useState(false);
+  const [search,setSearch]=useState("");
+  const [error,setError]=useState("");
+
+  const load=useCallback(async()=>{
+    setLoading(true);setError("");
+    const p=new URLSearchParams({tenant_id:TENANT_ID});
+    if(search) p.set("search",search);
+    const res=await apiFetch(`/products?${p}`);
+    if(res.success) setProducts(res.data||[]); else setError(res.error);
+    setLoading(false);
+  },[search]);
+
+  useEffect(()=>{load();},[load]);
+
+  if(subTab==="products-import") return <ProductImportTab products={products} onReload={load} C={C}/>;
 
   if(subTab&&!["products-list","products-import"].includes(subTab)) return <ComingSoon title={subTab} C={C}/>;
 
