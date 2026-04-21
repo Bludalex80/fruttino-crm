@@ -108,25 +108,97 @@ const Modal = ({ title, onClose, children, width=520, C }) => (
 
 // ── AUTH ───────────────────────────────────────────────────
 const AuthScreen = () => {
+  const [mode,setMode]=useState("login"); // "login"|"register"
+  const [email,setEmail]=useState("");
+  const [password,setPassword]=useState("");
+  const [name,setName]=useState("");
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
-  const login = async () => {
-    setLoading(true); setError("");
-    const { error } = await supabase.auth.signInWithOAuth({ provider:"google", options:{ redirectTo: window.location.origin } });
-    if (error) { setError(error.message); setLoading(false); }
+  const [success,setSuccess]=useState("");
+  const C=THEMES.light;
+
+  const loginGoogle=async()=>{
+    setLoading(true);setError("");
+    const{error}=await supabase.auth.signInWithOAuth({provider:"google",options:{redirectTo:window.location.origin}});
+    if(error){setError(error.message);setLoading(false);}
   };
-  const C = THEMES.light;
-  return (
-    <div style={{ minHeight:"100vh",background:`linear-gradient(135deg,${C.navy} 0%,#2d4e7e 100%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:20 }}>
-      <div style={{ background:C.surface,borderRadius:20,padding:"48px 40px",width:"100%",maxWidth:420,boxShadow:"0 24px 80px rgba(0,0,0,0.3)",textAlign:"center" }}>
-        <div style={{ fontSize:64,marginBottom:20 }}>🍇</div>
-        <h1 style={{ fontSize:28,fontWeight:800,color:C.navy,marginBottom:8 }}>Fruttino CRM</h1>
-        <p style={{ fontSize:15,color:C.soft,marginBottom:36 }}>Panel zarządzania sprzedażą wielokanałową</p>
-        <button onClick={login} disabled={loading} style={{ width:"100%",padding:"15px 20px",borderRadius:12,border:`1px solid ${C.border}`,background:C.surface,cursor:loading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:12,fontSize:15,fontWeight:600,color:C.text,fontFamily:"inherit",opacity:loading?0.7:1 }}>
-          <svg width="22" height="22" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
-          {loading ? "Logowanie..." : "Zaloguj się przez Google"}
-        </button>
-        {error && <div style={{ marginTop:16,padding:"10px 14px",background:"#fee2e2",borderRadius:10,fontSize:13,color:"#dc2626" }}>⚠ {error}</div>}
+  const loginEmail=async()=>{
+    if(!email||!password){setError("Wprowadź e-mail i hasło");return;}
+    setLoading(true);setError("");
+    const{error}=await supabase.auth.signInWithPassword({email,password});
+    if(error){setError(error.message);}
+    setLoading(false);
+  };
+  const register=async()=>{
+    if(!email||!password||!name){setError("Wypełnij wszystkie pola");return;}
+    if(password.length<6){setError("Hasło musi mieć co najmniej 6 znaków");return;}
+    setLoading(true);setError("");
+    const{error}=await supabase.auth.signUp({email,password,options:{data:{full_name:name}}});
+    if(error)setError(error.message);
+    else setSuccess("Sprawdź e-mail i potwierdź konto, aby się zalogować. Pierwszy zarejestrowany użytkownik zostaje administratorem.");
+    setLoading(false);
+  };
+  const inp=(v,s,ph,type="text")=>(
+    <input type={type} value={v} onChange={e=>s(e.target.value)} placeholder={ph}
+      style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${C.border}`,fontSize:14,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box"}}/>
+  );
+
+  return(
+    <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${C.navy} 0%,#2d4e7e 100%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:C.surface,borderRadius:20,padding:"44px 36px",width:"100%",maxWidth:420,boxShadow:"0 24px 80px rgba(0,0,0,0.3)",textAlign:"center"}}>
+        <div style={{fontSize:60,marginBottom:14}}>🍇</div>
+        <h1 style={{fontSize:26,fontWeight:800,color:C.navy,marginBottom:6}}>Fruttino CRM</h1>
+        <p style={{fontSize:14,color:C.soft,marginBottom:24}}>Panel zarządzania sprzedażą wielokanałową</p>
+
+        {/* Mode tabs */}
+        <div style={{display:"flex",gap:4,marginBottom:24,background:C.alt,borderRadius:10,padding:4}}>
+          {[{id:"login",label:"Logowanie"},{id:"register",label:"Rejestracja admina"}].map(t=>(
+            <button key={t.id} onClick={()=>{setMode(t.id);setError("");setSuccess("");}}
+              style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:mode===t.id?C.surface:"transparent",
+                color:mode===t.id?C.navy:C.soft,fontSize:13,fontWeight:mode===t.id?700:400,cursor:"pointer",fontFamily:"inherit",
+                boxShadow:mode===t.id?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {success?(
+          <div style={{padding:16,background:"#dcfce7",borderRadius:12,color:"#065f46",fontSize:14,lineHeight:1.6,textAlign:"left"}}>
+            ✅ {success}
+          </div>
+        ):mode==="register"?(
+          <div style={{display:"flex",flexDirection:"column",gap:12,textAlign:"left"}}>
+            <div><div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>IMIĘ I NAZWISKO</div>{inp(name,setName,"Jan Kowalski")}</div>
+            <div><div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>E-MAIL</div>{inp(email,setEmail,"admin@firma.pl","email")}</div>
+            <div><div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>HASŁO (min. 6 znaków)</div>{inp(password,setPassword,"••••••••","password")}</div>
+            <div style={{padding:"10px 12px",background:C.blueBg,borderRadius:8,fontSize:12,color:C.blue,lineHeight:1.6}}>
+              🔑 Pierwszy zarejestrowany użytkownik automatycznie otrzymuje rolę Administratora
+            </div>
+            <button onClick={register} disabled={loading}
+              style={{padding:14,borderRadius:12,border:"none",background:C.navy,color:"#fff",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",opacity:loading?0.7:1}}>
+              {loading?"Tworzenie konta...":"🚀 Utwórz konto administratora"}
+            </button>
+          </div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:12,textAlign:"left"}}>
+            <div><div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>E-MAIL</div>{inp(email,setEmail,"email@firma.pl","email")}</div>
+            <div><div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>HASŁO</div>{inp(password,setPassword,"••••••••","password")}</div>
+            <button onClick={loginEmail} disabled={loading}
+              style={{padding:14,borderRadius:12,border:"none",background:C.accent,color:"#fff",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",opacity:loading?0.7:1}}>
+              {loading?"Logowanie...":"Zaloguj się"}
+            </button>
+            <div style={{display:"flex",alignItems:"center",gap:8,margin:"4px 0"}}>
+              <div style={{flex:1,height:1,background:C.border}}/><span style={{fontSize:12,color:C.soft}}>lub</span><div style={{flex:1,height:1,background:C.border}}/>
+            </div>
+            <button onClick={loginGoogle} disabled={loading}
+              style={{padding:"13px 20px",borderRadius:12,border:`1px solid ${C.border}`,background:C.surface,cursor:loading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:12,fontSize:14,fontWeight:600,color:C.text,fontFamily:"inherit",opacity:loading?0.7:1}}>
+              <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="m6.306 14.691 6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
+              Zaloguj się przez Google
+            </button>
+          </div>
+        )}
+
+        {error&&<div style={{marginTop:14,padding:"10px 14px",background:"#fee2e2",borderRadius:10,fontSize:13,color:"#dc2626",textAlign:"left"}}>⚠ {error}</div>}
       </div>
     </div>
   );
@@ -225,81 +297,130 @@ const MyAccountModal = ({ user, onClose, C }) => {
 };
 
 // ── EMPLOYEES MODAL ────────────────────────────────────────
-const MOCK_EMPLOYEES = [
-  { id:"e1", name:"Aleksander Bludow",  email:"bludalex80@gmail.com",  role:"admin",     avatar:null,  active:true,  joined:"2025-01-15" },
-  { id:"e2", name:"Katarzyna Nowak",    email:"k.nowak@fruttino.pl",   role:"manager",   avatar:null,  active:true,  joined:"2025-03-01" },
-  { id:"e3", name:"Piotr Wiśniewski",   email:"p.wisniewski@gmail.com",role:"warehouse", avatar:null,  active:true,  joined:"2025-04-10" },
-  { id:"e4", name:"Anna Kowalczyk",     email:"a.kowalczyk@gmail.com", role:"viewer",    avatar:null,  active:false, joined:"2025-02-20" },
-];
 const ROLES = { admin:"Administrator", manager:"Menedżer", warehouse:"Magazyn", viewer:"Tylko podgląd" };
 const ROLE_COLORS = { admin:{bg:"#fee2e2",text:"#991b1b"}, manager:{bg:"#dbeafe",text:"#1e40af"}, warehouse:{bg:"#dcfce7",text:"#065f46"}, viewer:{bg:"#f3f4f6",text:"#6b7280"} };
 
 const EmployeesModal = ({ onClose, C }) => {
-  const [employees, setEmployees] = useState(MOCK_EMPLOYEES);
-  const [showAdd,   setShowAdd]   = useState(false);
-  const [newEmp,    setNewEmp]    = useState({ name:"", email:"", role:"viewer" });
-  const [adding,    setAdding]    = useState(false);
+  const [employees,setEmployees]=useState([]);
+  const [loadingEmp,setLoadingEmp]=useState(true);
+  const [showAdd,setShowAdd]=useState(false);
+  const [newEmp,setNewEmp]=useState({email:"",role:"viewer"});
+  const [adding,setAdding]=useState(false);
+  const [addMsg,setAddMsg]=useState("");
+  const [empErr,setEmpErr]=useState("");
 
-  const addEmp = async () => {
-    setAdding(true);
-    await new Promise(r=>setTimeout(r,600));
-    setEmployees(prev=>[...prev,{...newEmp,id:"e"+Date.now(),avatar:null,active:true,joined:new Date().toISOString().slice(0,10)}]);
-    setNewEmp({name:"",email:"",role:"viewer"}); setShowAdd(false); setAdding(false);
+  const loadEmployees=async()=>{
+    setLoadingEmp(true);
+    const{data,error}=await supabase.from("profiles").select("*").eq("tenant_id",TENANT_ID).order("created_at");
+    if(!error) setEmployees(data||[]);
+    setLoadingEmp(false);
   };
-  const toggleActive = (id) => setEmployees(prev=>prev.map(e=>e.id===id?{...e,active:!e.active}:e));
-  const changeRole   = (id,role) => setEmployees(prev=>prev.map(e=>e.id===id?{...e,role}:e));
+  useEffect(()=>{loadEmployees();},[]);
 
-  return (
-    <Modal title="👥 Profile pracowników" onClose={onClose} width={580} C={C}>
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
-        <div style={{ fontSize:13,color:C.soft }}>{employees.filter(e=>e.active).length} aktywnych / {employees.length} łącznie</div>
-        <button onClick={()=>setShowAdd(!showAdd)} style={{ padding:"7px 16px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>+ Zaproś pracownika</button>
+  const invite=async()=>{
+    if(!newEmp.email)return;
+    setAdding(true);setEmpErr("");
+    // Insert pending profile (may conflict if user already exists — ignore)
+    await supabase.from("profiles").upsert({
+      id:crypto.randomUUID(),email:newEmp.email,
+      full_name:newEmp.email.split("@")[0],
+      tenant_id:TENANT_ID,role:newEmp.role,status:"invited",active:false
+    },{onConflict:"email",ignoreDuplicates:false});
+    // Send magic link invite
+    const{error}=await supabase.auth.signInWithOtp({
+      email:newEmp.email,
+      options:{shouldCreateUser:true,emailRedirectTo:window.location.origin}
+    });
+    if(error)setEmpErr(error.message);
+    else{setAddMsg(`✅ Zaproszenie wysłane na ${newEmp.email}`);setNewEmp({email:"",role:"viewer"});setShowAdd(false);loadEmployees();}
+    setAdding(false);
+  };
+
+  const changeRole=async(id,role)=>{
+    await supabase.from("profiles").update({role}).eq("id",id);
+    setEmployees(prev=>prev.map(e=>e.id===id?{...e,role}:e));
+  };
+  const toggleActive=async(emp)=>{
+    const na=!emp.active;
+    await supabase.from("profiles").update({active:na,status:na?"active":"disabled"}).eq("id",emp.id);
+    setEmployees(prev=>prev.map(e=>e.id===emp.id?{...e,active:na}:e));
+  };
+  const removeUser=async(id)=>{
+    if(!window.confirm("Usunąć tego pracownika z systemu?"))return;
+    await supabase.from("profiles").delete().eq("id",id);
+    setEmployees(prev=>prev.filter(e=>e.id!==id));
+  };
+
+  return(
+    <Modal title="👥 Profile pracowników" onClose={onClose} width={600} C={C}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={{fontSize:13,color:C.soft}}>{employees.filter(e=>e.active).length} aktywnych / {employees.length} łącznie</div>
+        <button onClick={()=>setShowAdd(!showAdd)} style={{padding:"7px 16px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Zaproś pracownika</button>
       </div>
-      {/* Add form */}
+
+      {addMsg&&<div style={{padding:"10px 14px",background:"#dcfce7",borderRadius:8,color:"#065f46",fontSize:13,marginBottom:14}}>{addMsg}</div>}
+
       {showAdd&&(
-        <Card C={C} style={{ padding:16,marginBottom:16,background:C.alt }}>
-          <div style={{ fontSize:12,fontWeight:700,color:C.text,marginBottom:12 }}>Nowy pracownik</div>
-          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
-            <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>IMIĘ I NAZWISKO</div>
-              <input value={newEmp.name} onChange={e=>setNewEmp({...newEmp,name:e.target.value})} placeholder="Jan Kowalski" style={{ width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/></div>
-            <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>E-MAIL</div>
-              <input value={newEmp.email} onChange={e=>setNewEmp({...newEmp,email:e.target.value})} placeholder="email@firma.pl" type="email" style={{ width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/></div>
-          </div>
-          <div style={{ marginBottom:10 }}>
-            <div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>ROLA</div>
-            <select value={newEmp.role} onChange={e=>setNewEmp({...newEmp,role:e.target.value})} style={{ width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,cursor:"pointer",boxSizing:"border-box" }}>
+        <Card C={C} style={{padding:16,marginBottom:16,background:C.alt}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Wyślij zaproszenie e-mail</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr auto",gap:10,marginBottom:10}}>
+            <input value={newEmp.email} onChange={e=>setNewEmp({...newEmp,email:e.target.value})} placeholder="email@firma.pl" type="email"
+              style={{padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,width:"100%",boxSizing:"border-box"}}/>
+            <select value={newEmp.role} onChange={e=>setNewEmp({...newEmp,role:e.target.value})}
+              style={{padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,cursor:"pointer"}}>
               {Object.entries(ROLES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
             </select>
           </div>
-          <div style={{ display:"flex",gap:8 }}>
-            <button onClick={()=>setShowAdd(false)} style={{ flex:1,padding:"8px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Anuluj</button>
-            <button onClick={addEmp} disabled={!newEmp.name||!newEmp.email||adding} style={{ flex:2,padding:"8px",borderRadius:7,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:!newEmp.name||!newEmp.email?0.5:1 }}>{adding?"Zapraszanie...":"✉ Wyślij zaproszenie"}</button>
+          {empErr&&<div style={{padding:"8px 10px",background:"#fee2e2",borderRadius:6,color:"#dc2626",fontSize:12,marginBottom:10}}>⚠ {empErr}</div>}
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setShowAdd(false)} style={{flex:1,padding:"8px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit"}}>Anuluj</button>
+            <button onClick={invite} disabled={!newEmp.email||adding}
+              style={{flex:2,padding:"8px",borderRadius:7,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:!newEmp.email?0.5:1}}>
+              {adding?"Wysyłanie...":"✉ Wyślij zaproszenie"}
+            </button>
           </div>
         </Card>
       )}
-      {/* Employee list */}
-      <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-        {employees.map(e=>{
-          const rc=ROLE_COLORS[e.role]||ROLE_COLORS.viewer;
-          return (
-            <div key={e.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:10,border:`1px solid ${C.border}`,background:e.active?C.surface:C.alt,opacity:e.active?1:0.6 }}>
-              <div style={{ width:38,height:38,borderRadius:"50%",background:C.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.accent,flexShrink:0 }}>{e.name.slice(0,1)}</div>
-              <div style={{ flex:1,minWidth:0 }}>
-                <div style={{ fontSize:14,fontWeight:600,color:C.text }}>{e.name}</div>
-                <div style={{ fontSize:11,color:C.soft }}>{e.email}</div>
+
+      {loadingEmp?(
+        <div style={{textAlign:"center",padding:40,color:C.soft}}>Ładowanie...</div>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {employees.map(e=>{
+            const rc=ROLE_COLORS[e.role]||ROLE_COLORS.viewer;
+            const invited=e.status==="invited";
+            return(
+              <div key={e.id} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:10,border:`1px solid ${C.border}`,background:e.active?C.surface:C.alt,opacity:e.active?1:0.65}}>
+                <div style={{width:38,height:38,borderRadius:"50%",background:C.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.accent,flexShrink:0}}>
+                  {(e.full_name||e.email||"?").slice(0,1).toUpperCase()}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:14,fontWeight:600,color:C.text}}>{e.full_name||e.email?.split("@")[0]}</span>
+                    {invited&&<span style={{fontSize:10,background:"#fef3c7",color:"#92400e",padding:"1px 6px",borderRadius:4,fontWeight:600}}>zaproszony</span>}
+                  </div>
+                  <div style={{fontSize:11,color:C.soft}}>{e.email}</div>
+                </div>
+                <select value={e.role} onChange={ev=>changeRole(e.id,ev.target.value)}
+                  style={{padding:"5px 8px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:rc.bg,color:rc.text,cursor:"pointer",fontWeight:600}}>
+                  {Object.entries(ROLES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+                </select>
+                <div onClick={()=>toggleActive(e)} style={{width:34,height:19,borderRadius:10,background:e.active?C.green:C.border,cursor:"pointer",position:"relative",flexShrink:0}}>
+                  <div style={{position:"absolute",top:2,left:e.active?16:2,width:15,height:15,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/>
+                </div>
+                <button onClick={()=>removeUser(e.id)} title="Usuń z systemu"
+                  style={{width:28,height:28,borderRadius:7,border:`1px solid ${C.border}`,background:"transparent",color:"#dc2626",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  ✕
+                </button>
               </div>
-              <select value={e.role} onChange={ev=>changeRole(e.id,ev.target.value)} style={{ padding:"5px 8px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:rc.bg,color:rc.text,cursor:"pointer",fontWeight:600 }}>
-                {Object.entries(ROLES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
-              </select>
-              <div onClick={()=>toggleActive(e.id)} style={{ width:34,height:19,borderRadius:10,background:e.active?C.green:C.border,cursor:"pointer",position:"relative",flexShrink:0 }}>
-                <div style={{ position:"absolute",top:2,left:e.active?16:2,width:15,height:15,borderRadius:"50%",background:"#fff",transition:"left 0.2s" }}/>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ marginTop:16,padding:"10px 14px",background:C.blueBg,borderRadius:8,fontSize:12,color:C.blue,lineHeight:1.7 }}>
-        ℹ Zaproszeni pracownicy logują się przez Google. Rola decyduje o poziomie dostępu do modułów CRM.
+            );
+          })}
+          {employees.length===0&&<div style={{textAlign:"center",padding:32,color:C.soft,fontSize:14}}>Brak pracowników</div>}
+        </div>
+      )}
+
+      <div style={{marginTop:16,padding:"10px 14px",background:C.blueBg,borderRadius:8,fontSize:12,color:C.blue,lineHeight:1.7}}>
+        ℹ Zaproszeni pracownicy otrzymują e-mail z linkiem logowania. Rola decyduje o poziomie dostępu.
       </div>
     </Modal>
   );
