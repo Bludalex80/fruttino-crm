@@ -108,7 +108,7 @@ const Modal = ({ title, onClose, children, width=520, C }) => (
 
 // ── AUTH ───────────────────────────────────────────────────
 const AuthScreen = () => {
-  const [mode,setMode]=useState("login"); // "login"|"register"
+  const [mode,setMode]=useState("login"); // "login"|"register"|"magic"
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const [name,setName]=useState("");
@@ -127,6 +127,16 @@ const AuthScreen = () => {
     setLoading(true);setError("");
     const{error}=await supabase.auth.signInWithPassword({email,password});
     if(error){setError(error.message);}
+    setLoading(false);
+  };
+  const sendMagicLink=async()=>{
+    if(!email){setError("Wprowadź adres e-mail");return;}
+    setLoading(true);setError("");
+    const{error}=await supabase.auth.signInWithOtp({
+      email,options:{shouldCreateUser:false,emailRedirectTo:window.location.origin}
+    });
+    if(error)setError(error.message);
+    else setSuccess(`Link logowania wysłany na ${email}. Kliknij go w e-mailu — nie potrzebujesz hasła.`);
     setLoading(false);
   };
   const register=async()=>{
@@ -151,11 +161,11 @@ const AuthScreen = () => {
         <p style={{fontSize:14,color:C.soft,marginBottom:24}}>Panel zarządzania sprzedażą wielokanałową</p>
 
         {/* Mode tabs */}
-        <div style={{display:"flex",gap:4,marginBottom:24,background:C.alt,borderRadius:10,padding:4}}>
-          {[{id:"login",label:"Logowanie"},{id:"register",label:"Rejestracja admina"}].map(t=>(
+        <div style={{display:"flex",gap:3,marginBottom:24,background:C.alt,borderRadius:10,padding:4}}>
+          {[{id:"login",label:"Hasło"},{id:"magic",label:"Link e-mail"},{id:"register",label:"Rejestracja"}].map(t=>(
             <button key={t.id} onClick={()=>{setMode(t.id);setError("");setSuccess("");}}
-              style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:mode===t.id?C.surface:"transparent",
-                color:mode===t.id?C.navy:C.soft,fontSize:13,fontWeight:mode===t.id?700:400,cursor:"pointer",fontFamily:"inherit",
+              style={{flex:1,padding:"7px 4px",borderRadius:8,border:"none",background:mode===t.id?C.surface:"transparent",
+                color:mode===t.id?C.navy:C.soft,fontSize:12,fontWeight:mode===t.id?700:400,cursor:"pointer",fontFamily:"inherit",
                 boxShadow:mode===t.id?"0 1px 4px rgba(0,0,0,0.1)":"none"}}>
               {t.label}
             </button>
@@ -165,6 +175,18 @@ const AuthScreen = () => {
         {success?(
           <div style={{padding:16,background:"#dcfce7",borderRadius:12,color:"#065f46",fontSize:14,lineHeight:1.6,textAlign:"left"}}>
             ✅ {success}
+          </div>
+        ):mode==="magic"?(
+          /* Magic link — for invited users without password */
+          <div style={{display:"flex",flexDirection:"column",gap:12,textAlign:"left"}}>
+            <div style={{padding:"12px 14px",background:"#fef3c7",borderRadius:10,fontSize:13,color:"#92400e",lineHeight:1.6}}>
+              ✉ Jeśli zostałeś zaproszony przez administratora, wpisz swój e-mail i wyślemy Ci link logowania — <strong>bez hasła</strong>.
+            </div>
+            <div><div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>TWÓJ E-MAIL</div>{inp(email,setEmail,"email@firma.pl","email")}</div>
+            <button onClick={sendMagicLink} disabled={loading}
+              style={{padding:14,borderRadius:12,border:"none",background:"#d97706",color:"#fff",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",opacity:loading?0.7:1}}>
+              {loading?"Wysyłanie...":"✉ Wyślij link logowania"}
+            </button>
           </div>
         ):mode==="register"?(
           <div style={{display:"flex",flexDirection:"column",gap:12,textAlign:"left"}}>
@@ -3093,10 +3115,61 @@ const AnalyticsTab = ({ stats, user, isMobile, C }) => (
   </div>
 );
 
+// ── SET PASSWORD SCREEN (first login via magic link) ───────
+const SetPasswordScreen = ({ onPasswordSet }) => {
+  const [password,setPassword]=useState("");
+  const [confirm,setConfirm]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [error,setError]=useState("");
+  const C=THEMES.light;
+
+  const save=async()=>{
+    if(password.length<6){setError("Hasło musi mieć co najmniej 6 znaków");return;}
+    if(password!==confirm){setError("Hasła nie są identyczne");return;}
+    setLoading(true);setError("");
+    const{data:{user},error:err}=await supabase.auth.updateUser({password});
+    if(err){setError(err.message);setLoading(false);return;}
+    // Mark profile as active
+    if(user) await supabase.from("profiles").update({status:"active",active:true}).eq("id",user.id);
+    setLoading(false);
+    onPasswordSet();
+  };
+
+  return(
+    <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${C.navy} 0%,#2d4e7e 100%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:C.surface,borderRadius:20,padding:"44px 36px",width:"100%",maxWidth:420,boxShadow:"0 24px 80px rgba(0,0,0,0.3)",textAlign:"center"}}>
+        <div style={{fontSize:56,marginBottom:16}}>🔐</div>
+        <h1 style={{fontSize:22,fontWeight:800,color:C.navy,marginBottom:8}}>Witaj w Fruttino CRM!</h1>
+        <p style={{fontSize:14,color:C.soft,marginBottom:28,lineHeight:1.6}}>
+          Zostałeś zaproszony do systemu.<br/>Utwórz hasło, którego będziesz używać przy kolejnych logowaniach.
+        </p>
+        <div style={{display:"flex",flexDirection:"column",gap:14,textAlign:"left"}}>
+          <div>
+            <div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>NOWE HASŁO (min. 6 znaków)</div>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••"
+              style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${C.border}`,fontSize:14,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box"}}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.soft,marginBottom:5,fontWeight:600}}>POWTÓRZ HASŁO</div>
+            <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} placeholder="••••••••"
+              style={{width:"100%",padding:"12px 14px",borderRadius:10,border:`1px solid ${C.border}`,fontSize:14,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box"}}/>
+          </div>
+          {error&&<div style={{padding:"10px 12px",background:"#fee2e2",borderRadius:8,color:"#dc2626",fontSize:13}}>⚠ {error}</div>}
+          <button onClick={save} disabled={loading||!password||!confirm}
+            style={{padding:14,borderRadius:12,border:"none",background:C.accent,color:"#fff",fontSize:15,fontWeight:700,cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",opacity:!password||!confirm?0.5:1}}>
+            {loading?"Zapisywanie...":"✅ Ustaw hasło i wejdź do CRM"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── APP ROOT ───────────────────────────────────────────────
 export default function App() {
   const [session,setSession]=useState(null);
   const [authLoading,setAuthLoading]=useState(true);
+  const [profileStatus,setProfileStatus]=useState(null); // "active"|"invited"|null
   const [tab,setTab]=useState("dashboard");
   const [subTab,setSubTab]=useState(null);
   const [stats,setStats]=useState({newOrders:0,totalOrders:0,totalProducts:0,lowStock:0,byStatus:{}});
@@ -3114,10 +3187,22 @@ export default function App() {
   useEffect(()=>{ const h=()=>setIsMobile(window.innerWidth<768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h); },[]);
 
   useEffect(()=>{
-    supabase.auth.getSession().then(({data:{session}})=>{setSession(session);setAuthLoading(false);});
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{setSession(session);setAuthLoading(false);});
+    supabase.auth.getSession().then(({data:{session}})=>{
+      setSession(session);setAuthLoading(false);
+      if(session?.user) fetchProfileStatus(session.user.id);
+    });
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{
+      setSession(session);setAuthLoading(false);
+      if(session?.user) fetchProfileStatus(session.user.id);
+      else setProfileStatus(null);
+    });
     return()=>subscription.unsubscribe();
   },[]);
+
+  const fetchProfileStatus=async(uid)=>{
+    const{data}=await supabase.from("profiles").select("status").eq("id",uid).single();
+    setProfileStatus(data?.status||"active");
+  };
 
   useEffect(()=>{
     if(!session) return;
@@ -3138,6 +3223,8 @@ export default function App() {
     </div>
   );
   if(!session) return <AuthScreen/>;
+  if(session && profileStatus==="invited") return <SetPasswordScreen onPasswordSet={()=>setProfileStatus("active")}/>;
+  if(session && profileStatus===null) return null; // loading profile
 
   const renderTab=(mobile=false)=>{
     if(tab==="dashboard")  return <DashboardTab stats={stats} C={C}/>;
