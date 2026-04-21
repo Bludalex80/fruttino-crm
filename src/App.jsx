@@ -786,6 +786,257 @@ const OrderDetailView = ({ order: initialOrder, orders, onBack, C, onStatusUpdat
   );
 };
 
+// ── AUTOMATIC ACTIONS TAB (M9) ────────────────────────────
+const TRIGGER_LABELS = {
+  status_new:        "Nowe zamówienie",
+  status_processing: "Status → W realizacji",
+  status_shipped:    "Status → Wysłane",
+  status_delivered:  "Status → Dostarczone",
+  status_cancelled:  "Status → Anulowane",
+  order_created:     "Zamówienie przyjęte (dowolny status)",
+  amount_over:       "Kwota zamówienia > X PLN",
+};
+const ACTION_LABELS = {
+  send_email: "Wyślij e-mail",
+  send_sms:   "Wyślij SMS",
+  webhook:    "HTTP Webhook (POST)",
+  note:       "Dodaj notatkę do zamówienia",
+};
+const MOCK_RULES = [
+  { id:"r1", name:"Potwierdzenie zamówienia", enabled:true,  trigger:"order_created",     conditions:[], actions:[{type:"send_email",to:"customer",subject:"Twoje zamówienie zostało przyjęte",body:"Dziękujemy za zamówienie #{order_id}. Przygotowujemy je dla Ciebie."}], runs:142, last_run:"2026-04-21T05:48:00Z" },
+  { id:"r2", name:"Powiadomienie o wysyłce",  enabled:true,  trigger:"status_shipped",    conditions:[], actions:[{type:"send_email",to:"customer",subject:"Twoje zamówienie #{order_id} zostało wysłane",body:"Twoja przesyłka jest w drodze. Nr śledzenia: #{tracking}."},{type:"send_sms",to:"customer",body:"Fruttino: zamówienie #{order_id} wysłane. Śledzenie: #{tracking}"}], runs:98, last_run:"2026-04-20T18:22:00Z" },
+  { id:"r3", name:"Alert — duże zamówienie",  enabled:true,  trigger:"amount_over",       conditions:[{field:"amount",op:">",value:"500"}], actions:[{type:"send_email",to:"admin",subject:"Duże zamówienie: #{order_id} — #{amount} PLN",body:"Zamówienie #{order_id} na kwotę #{amount} PLN wymaga uwagi."}], runs:7, last_run:"2026-04-19T14:00:00Z" },
+  { id:"r4", name:"Anulowanie — e-mail",      enabled:false, trigger:"status_cancelled",  conditions:[], actions:[{type:"send_email",to:"customer",subject:"Zamówienie #{order_id} anulowane",body:"Twoje zamówienie zostało anulowane. W razie pytań skontaktuj się z nami."}], runs:3, last_run:"2026-04-15T10:00:00Z" },
+];
+const MOCK_ACTION_LOG = [
+  { id:1, rule:"Potwierdzenie zamówienia", order:"ALG-20240421-001", action:"send_email", to:"jan@example.com",     status:"ok",    ts:"2026-04-21T05:48:00Z" },
+  { id:2, rule:"Powiadomienie o wysyłce",  order:"WOO-20240420-009", action:"send_email", to:"anna@example.com",    status:"ok",    ts:"2026-04-20T18:22:00Z" },
+  { id:3, rule:"Powiadomienie o wysyłce",  order:"WOO-20240420-009", action:"send_sms",   to:"+48 600 000 001",     status:"ok",    ts:"2026-04-20T18:22:01Z" },
+  { id:4, rule:"Alert — duże zamówienie",  order:"ALG-20240419-003", action:"send_email", to:"admin@fruttino.pl",   status:"ok",    ts:"2026-04-19T14:00:00Z" },
+  { id:5, rule:"Potwierdzenie zamówienia", order:"ALG-20240418-007", action:"send_email", to:"piotr@example.com",   status:"error", ts:"2026-04-18T09:10:00Z" },
+];
+
+const AutomaticActionsTab = ({ C }) => {
+  const [rules, setRules] = useState(MOCK_RULES);
+  const [log]             = useState(MOCK_ACTION_LOG);
+  const [sub, setSub]     = useState("rules");
+  const [showModal, setShowModal]   = useState(false);
+  const [editRule,  setEditRule]    = useState(null);
+  const [testing,   setTesting]     = useState(null);
+  const [testResult,setTestResult]  = useState({});
+
+  // Rule form state
+  const blankRule = { name:"", enabled:true, trigger:"order_created", conditions:[], actions:[{type:"send_email",to:"customer",subject:"",body:""}] };
+  const [form, setForm] = useState(blankRule);
+
+  const openAdd  = ()=>{ setForm(blankRule); setEditRule(null); setShowModal(true); };
+  const openEdit = (r)=>{ setForm({...r,actions:[...r.actions.map(a=>({...a}))],conditions:[...r.conditions]}); setEditRule(r.id); setShowModal(true); };
+
+  const saveRule = () => {
+    if (editRule) {
+      setRules(prev=>prev.map(r=>r.id===editRule?{...r,...form}:r));
+    } else {
+      setRules(prev=>[...prev,{...form,id:"r"+Date.now(),runs:0,last_run:null}]);
+    }
+    setShowModal(false);
+  };
+
+  const toggleRule = (id) => setRules(prev=>prev.map(r=>r.id===id?{...r,enabled:!r.enabled}:r));
+  const deleteRule = (id) => setRules(prev=>prev.filter(r=>r.id!==id));
+
+  const testRule = async (id) => {
+    setTesting(id);
+    await new Promise(r=>setTimeout(r,1200));
+    setTestResult(p=>({...p,[id]:{ ok:true, msg:"Reguła uruchomiona na zamówieniu testowym — akcje wykonane" }}));
+    setTesting(null);
+  };
+
+  const setAction = (i,field,val)=>setForm(f=>({ ...f, actions:f.actions.map((a,idx)=>idx===i?{...a,[field]:val}:a) }));
+  const addAction = ()=>setForm(f=>({...f,actions:[...f.actions,{type:"send_email",to:"customer",subject:"",body:""}]}));
+  const removeAction = (i)=>setForm(f=>({...f,actions:f.actions.filter((_,idx)=>idx!==i)}));
+
+  const inp=(v,s,ph="")=><input value={v} onChange={e=>s(e.target.value)} placeholder={ph} style={{ width:"100%",padding:"8px 11px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/>;
+  const sel=(v,s,opts)=><select value={v} onChange={e=>s(e.target.value)} style={{ width:"100%",padding:"8px 11px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,cursor:"pointer",boxSizing:"border-box" }}>{opts.map(([k,l])=><option key={k} value={k}>{l}</option>)}</select>;
+
+  return (
+    <div>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        <h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Automatyczne akcje</h2>
+        <button onClick={openAdd} style={{ padding:"8px 20px",borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>+ Dodaj regułę</button>
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{ display:"flex",gap:4,marginBottom:24,borderBottom:`1px solid ${C.border}` }}>
+        {[{id:"rules",label:`⚡ Reguły (${rules.length})`},{id:"log",label:`📋 Log wykonania (${log.length})`}].map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)} style={{ padding:"8px 18px",border:"none",borderBottom:`2px solid ${sub===t.id?C.accent:"transparent"}`,background:"transparent",color:sub===t.id?C.accent:C.mid,fontSize:13,fontWeight:sub===t.id?700:400,cursor:"pointer",fontFamily:"inherit",marginBottom:-1 }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── RULES LIST ── */}
+      {sub==="rules" && (
+        <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+          {rules.map(r=>(
+            <Card key={r.id} C={C} style={{ padding:20,border:r.enabled?`1px solid ${C.border}`:`1px solid ${C.borderLight}`,opacity:r.enabled?1:0.65 }}>
+              <div style={{ display:"flex",alignItems:"flex-start",gap:14 }}>
+                {/* Toggle */}
+                <div onClick={()=>toggleRule(r.id)} style={{ width:40,height:22,borderRadius:11,background:r.enabled?C.green:C.border,cursor:"pointer",position:"relative",flexShrink:0,marginTop:2,transition:"background 0.2s" }}>
+                  <div style={{ position:"absolute",top:3,left:r.enabled?20:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)" }}/>
+                </div>
+                {/* Content */}
+                <div style={{ flex:1,minWidth:0 }}>
+                  <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:8 }}>
+                    <div style={{ fontSize:15,fontWeight:700,color:C.text }}>{r.name}</div>
+                    <span style={{ fontSize:11,padding:"2px 8px",borderRadius:100,background:r.enabled?C.greenBg:C.alt,color:r.enabled?C.green:C.soft,fontWeight:600 }}>{r.enabled?"Aktywna":"Nieaktywna"}</span>
+                  </div>
+                  {/* Trigger → Actions */}
+                  <div style={{ display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10 }}>
+                    <span style={{ fontSize:12,padding:"4px 10px",borderRadius:7,background:C.blueBg,color:C.blue,fontWeight:600 }}>⚡ {TRIGGER_LABELS[r.trigger]||r.trigger}</span>
+                    {r.conditions.length>0&&r.conditions.map((c,i)=><span key={i} style={{ fontSize:12,padding:"4px 10px",borderRadius:7,background:C.amberBg,color:C.amber,fontWeight:600 }}>🔍 {c.field} {c.op} {c.value}</span>)}
+                    <span style={{ fontSize:14,color:C.soft }}>→</span>
+                    {r.actions.map((a,i)=>(
+                      <span key={i} style={{ fontSize:12,padding:"4px 10px",borderRadius:7,background:C.purpleBg,color:C.purple,fontWeight:600 }}>
+                        {a.type==="send_email"?"📧":a.type==="send_sms"?"📱":a.type==="webhook"?"🔗":"📝"} {ACTION_LABELS[a.type]}
+                        {a.to&&<span style={{ fontWeight:400,opacity:0.8 }}> → {a.to==="customer"?"klient":"admin"}</span>}
+                      </span>
+                    ))}
+                  </div>
+                  {/* Stats + actions */}
+                  <div style={{ display:"flex",alignItems:"center",gap:16 }}>
+                    <span style={{ fontSize:12,color:C.soft }}>Uruchomień: <strong style={{ color:C.text }}>{r.runs}</strong></span>
+                    {r.last_run&&<span style={{ fontSize:12,color:C.soft }}>Ostatnio: {new Date(r.last_run).toLocaleString("pl-PL")}</span>}
+                    <div style={{ marginLeft:"auto",display:"flex",gap:6 }}>
+                      {testResult[r.id]&&<span style={{ fontSize:12,color:C.green,fontWeight:600 }}>✓ {testResult[r.id].msg}</span>}
+                      <button onClick={()=>testRule(r.id)} disabled={testing===r.id} style={{ padding:"5px 12px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===r.id?0.5:1 }}>{testing===r.id?"⏳":"▶ Test"}</button>
+                      <button onClick={()=>openEdit(r)} style={{ padding:"5px 12px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>✏ Edytuj</button>
+                      <button onClick={()=>deleteRule(r.id)} style={{ padding:"5px 12px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.red,fontFamily:"inherit" }}>🗑</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+          {rules.length===0&&<Empty text="Brak reguł — kliknij + Dodaj regułę" C={C}/>}
+          {/* Info box */}
+          <div style={{ padding:"12px 16px",background:C.blueBg,borderRadius:10,fontSize:12,color:C.blue,lineHeight:1.8,marginTop:4 }}>
+            ℹ Reguły są wykonywane automatycznie przy każdej zmianie statusu zamówienia lub przyjęciu nowego zamówienia. Możesz dodać wiele akcji do jednej reguły.
+          </div>
+        </div>
+      )}
+
+      {/* ── EXECUTION LOG ── */}
+      {sub==="log" && (
+        <div>
+          <div style={{ display:"flex",gap:10,marginBottom:20 }}>
+            {[{label:"Wszystkich",val:log.length,color:C.accent},{label:"OK",val:log.filter(l=>l.status==="ok").length,color:C.green},{label:"Błędów",val:log.filter(l=>l.status==="error").length,color:C.red}].map(s=>(
+              <Card key={s.label} C={C} style={{ padding:"10px 18px",flex:1,display:"flex",gap:10,alignItems:"center" }}>
+                <span style={{ fontSize:22,fontWeight:800,fontFamily:"monospace",color:s.color }}>{s.val}</span>
+                <span style={{ fontSize:12,color:C.soft }}>{s.label}</span>
+              </Card>
+            ))}
+          </div>
+          <Card C={C} style={{ overflow:"hidden" }}>
+            <div style={{ padding:"12px 20px",borderBottom:`1px solid ${C.border}` }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1 }}>LOG WYKONANIA AKCJI</div>
+            </div>
+            <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:C.alt }}>
+                  {["Reguła","Zamówienie","Akcja","Odbiorca","Status","Czas"].map(h=>(
+                    <th key={h} style={{ padding:"9px 16px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {log.map(l=>(
+                  <tr key={l.id} style={{ borderBottom:`1px solid ${C.borderLight}` }}>
+                    <td style={{ padding:"10px 16px",fontSize:13,fontWeight:500,color:C.text }}>{l.rule}</td>
+                    <td style={{ padding:"10px 16px",fontSize:12,fontFamily:"monospace",color:C.accent }}>{l.order}</td>
+                    <td style={{ padding:"10px 16px",fontSize:12,color:C.mid }}>
+                      {l.action==="send_email"?"📧 E-mail":l.action==="send_sms"?"📱 SMS":l.action==="webhook"?"🔗 Webhook":"📝"}
+                    </td>
+                    <td style={{ padding:"10px 16px",fontSize:12,color:C.mid }}>{l.to}</td>
+                    <td style={{ padding:"10px 16px" }}>
+                      <span style={{ fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:100,background:l.status==="ok"?C.greenBg:C.redBg,color:l.status==="ok"?C.green:C.red }}>{l.status==="ok"?"OK":"Błąd"}</span>
+                    </td>
+                    <td style={{ padding:"10px 16px",fontSize:11,color:C.soft,fontFamily:"monospace" }}>{new Date(l.ts).toLocaleString("pl-PL")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+
+      {/* ── ADD/EDIT MODAL ── */}
+      {showModal && (
+        <Modal title={editRule?"Edytuj regułę":"Dodaj regułę automatycznej akcji"} onClose={()=>setShowModal(false)} width={600} C={C}>
+          {/* Name */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:6,fontWeight:600 }}>NAZWA REGUŁY</div>
+            {inp(form.name,v=>setForm(f=>({...f,name:v})),"np. Potwierdzenie zamówienia")}
+          </div>
+          {/* Trigger */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:6,fontWeight:600 }}>WYZWALACZ (TRIGGER)</div>
+            {sel(form.trigger,v=>setForm(f=>({...f,trigger:v})),Object.entries(TRIGGER_LABELS))}
+          </div>
+          {/* Condition for amount_over */}
+          {form.trigger==="amount_over" && (
+            <div style={{ marginBottom:16,padding:"12px 14px",background:C.amberBg,borderRadius:8 }}>
+              <div style={{ fontSize:11,color:C.soft,marginBottom:6,fontWeight:600 }}>WARTOŚĆ PROGOWA (PLN)</div>
+              <input type="number" value={form.conditions[0]?.value||"500"} onChange={e=>setForm(f=>({...f,conditions:[{field:"amount",op:">",value:e.target.value}]}))} style={{ width:"100%",padding:"8px 11px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/>
+            </div>
+          )}
+          {/* Actions */}
+          <div style={{ marginBottom:16 }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
+              <div style={{ fontSize:11,color:C.soft,fontWeight:600 }}>AKCJE</div>
+              <button onClick={addAction} style={{ fontSize:12,color:C.accent,border:"none",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>+ Dodaj akcję</button>
+            </div>
+            {form.actions.map((a,i)=>(
+              <Card key={i} C={C} style={{ padding:14,marginBottom:10,background:C.alt }}>
+                <div style={{ display:"flex",gap:8,marginBottom:10,alignItems:"center" }}>
+                  <div style={{ flex:1 }}>{sel(a.type,v=>setAction(i,"type",v),Object.entries(ACTION_LABELS))}</div>
+                  {(a.type==="send_email"||a.type==="send_sms")&&(
+                    <div style={{ flex:1 }}>{sel(a.to||"customer",v=>setAction(i,"to",v),[["customer","Klient (zamówienie)"],["admin","Administrator"]])}</div>
+                  )}
+                  {form.actions.length>1&&<button onClick={()=>removeAction(i)} style={{ padding:"6px 10px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.red,fontFamily:"inherit",flexShrink:0 }}>✕</button>}
+                </div>
+                {a.type==="send_email"&&(
+                  <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                    <input value={a.subject||""} onChange={e=>setAction(i,"subject",e.target.value)} placeholder="Temat e-maila (np. Twoje zamówienie #{order_id})" style={{ width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/>
+                    <textarea value={a.body||""} onChange={e=>setAction(i,"body",e.target.value)} placeholder="Treść e-maila... Zmienne: #{order_id} #{tracking} #{amount} #{customer_name}" rows={3} style={{ width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:C.surface,color:C.text,resize:"vertical",boxSizing:"border-box" }}/>
+                  </div>
+                )}
+                {a.type==="send_sms"&&(
+                  <textarea value={a.body||""} onChange={e=>setAction(i,"body",e.target.value)} placeholder="Treść SMS (max 160 znaków). Zmienne: #{order_id} #{tracking} #{amount}" rows={2} style={{ width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:C.surface,color:C.text,resize:"none",boxSizing:"border-box" }}/>
+                )}
+                {a.type==="webhook"&&(
+                  <input value={a.url||""} onChange={e=>setAction(i,"url",e.target.value)} placeholder="https://example.com/webhook" style={{ width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/>
+                )}
+                {a.type==="note"&&(
+                  <input value={a.body||""} onChange={e=>setAction(i,"body",e.target.value)} placeholder="Treść notatki dołączanej do zamówienia" style={{ width:"100%",padding:"7px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/>
+                )}
+              </Card>
+            ))}
+          </div>
+          {/* Enabled toggle */}
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:20 }}>
+            <div onClick={()=>setForm(f=>({...f,enabled:!f.enabled}))} style={{ width:40,height:22,borderRadius:11,background:form.enabled?C.green:C.border,cursor:"pointer",position:"relative",transition:"background 0.2s" }}>
+              <div style={{ position:"absolute",top:3,left:form.enabled?20:3,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s" }}/>
+            </div>
+            <span style={{ fontSize:13,color:C.text }}>Reguła {form.enabled?"aktywna":"nieaktywna"}</span>
+          </div>
+          <div style={{ display:"flex",gap:10 }}>
+            <button onClick={()=>setShowModal(false)} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Anuluj</button>
+            <button onClick={saveRule} disabled={!form.name} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:!form.name?"not-allowed":"pointer",fontFamily:"inherit",opacity:!form.name?0.5:1 }}>💾 {editRule?"Zapisz zmiany":"Dodaj regułę"}</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 // ── ORDERS TAB ─────────────────────────────────────────────
 const OrdersTab = ({ subTab, isMobile, C }) => {
   const [orders,setOrders]=useState([]);
@@ -840,7 +1091,8 @@ const OrdersTab = ({ subTab, isMobile, C }) => {
     await load();
   };
 
-  const subLabels={"orders-invoices":"Faktury","orders-returns":"Zwroty","orders-clients":"Klienci","orders-statuses":"Statusy zamówień","orders-templates":"Szablony E-mail/SMS","orders-actions":"Automatyczne akcje","orders-exports":"Wydruki i eksporty","orders-imports":"Import przelewów","orders-settings":"Ustawienia"};
+  const subLabels={"orders-invoices":"Faktury","orders-returns":"Zwroty","orders-clients":"Klienci","orders-statuses":"Statusy zamówień","orders-templates":"Szablony E-mail/SMS","orders-exports":"Wydruki i eksporty","orders-imports":"Import przelewów","orders-settings":"Ustawienia"};
+  if(subTab==="orders-actions") return <AutomaticActionsTab C={C}/>;
   if(subTab&&subTab!=="orders-list") return <ComingSoon title={subLabels[subTab]||subTab} C={C}/>;
 
   if(detailOrder) return <OrderDetailView order={detailOrder} orders={orders.filter(o=>fSource==="all"||o.channels?.type===fSource)} onBack={()=>setDetailOrder(null)} C={C} onStatusUpdate={(id,status)=>{ setOrders(prev=>prev.map(o=>o.id===id?{...o,status}:o)); }}/>;
