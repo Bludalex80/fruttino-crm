@@ -133,10 +133,264 @@ const AuthScreen = () => {
 };
 
 // ── PROFILE MENU ───────────────────────────────────────────
+// ── MY ACCOUNT MODAL ──────────────────────────────────────
+const MyAccountModal = ({ user, onClose, C }) => {
+  const [displayName, setDisplayName] = useState(user?.user_metadata?.full_name||"");
+  const [phone,       setPhone]       = useState(user?.user_metadata?.phone||"");
+  const [lang,        setLang]        = useState("pl");
+  const [notifEmail,  setNotifEmail]  = useState(true);
+  const [notifSms,    setNotifSms]    = useState(false);
+  const [notifNew,    setNotifNew]    = useState(true);
+  const [notifLow,    setNotifLow]    = useState(true);
+  const [saving,      setSaving]      = useState(false);
+  const [saved,       setSaved]       = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    await supabase.auth.updateUser({ data:{ full_name:displayName, phone } });
+    await new Promise(r=>setTimeout(r,600));
+    setSaving(false); setSaved(true); setTimeout(()=>setSaved(false),2500);
+  };
+
+  const inp=(v,s,ph="",type="text")=>(
+    <input type={type} value={v} onChange={e=>s(e.target.value)} placeholder={ph}
+      style={{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/>
+  );
+  const Toggle=({on,set,label})=>(
+    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.borderLight}` }}>
+      <span style={{ fontSize:13,color:C.text }}>{label}</span>
+      <div onClick={()=>set(!on)} style={{ width:38,height:21,borderRadius:11,background:on?C.accent:C.border,cursor:"pointer",position:"relative",transition:"background 0.2s",flexShrink:0 }}>
+        <div style={{ position:"absolute",top:2.5,left:on?19:2.5,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left 0.2s" }}/>
+      </div>
+    </div>
+  );
+
+  return (
+    <Modal title="👤 Moje konto" onClose={onClose} width={500} C={C}>
+      {/* Avatar */}
+      <div style={{ display:"flex",alignItems:"center",gap:16,marginBottom:24,padding:"16px",background:C.alt,borderRadius:12 }}>
+        <div style={{ width:64,height:64,borderRadius:"50%",overflow:"hidden",border:`2px solid ${C.border}`,flexShrink:0 }}>
+          {user?.user_metadata?.avatar_url
+            ? <img src={user.user_metadata.avatar_url} style={{ width:64,height:64,objectFit:"cover" }}/>
+            : <div style={{ width:64,height:64,background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:700,color:"#fff" }}>{(displayName||user?.email||"U").slice(0,1).toUpperCase()}</div>
+          }
+        </div>
+        <div>
+          <div style={{ fontSize:16,fontWeight:700,color:C.text }}>{displayName||"Użytkownik"}</div>
+          <div style={{ fontSize:12,color:C.soft,marginTop:2 }}>{user?.email}</div>
+          <div style={{ fontSize:11,marginTop:4,background:C.blueBg,color:C.blue,padding:"2px 8px",borderRadius:4,display:"inline-block",fontWeight:600 }}>Administrator</div>
+        </div>
+      </div>
+      {/* Profile fields */}
+      <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>DANE PROFILU</div>
+      <div style={{ display:"flex",flexDirection:"column",gap:12,marginBottom:20 }}>
+        <div>
+          <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>IMIĘ I NAZWISKO</div>
+          {inp(displayName,setDisplayName,"Jan Kowalski")}
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+          <div>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>E-MAIL (Google)</div>
+            <input value={user?.email||""} readOnly style={{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.alt,color:C.soft,boxSizing:"border-box",cursor:"not-allowed" }}/>
+          </div>
+          <div>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>TELEFON</div>
+            {inp(phone,setPhone,"+48 000 000 000","tel")}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>JĘZYK INTERFEJSU</div>
+          <select value={lang} onChange={e=>setLang(e.target.value)} style={{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,cursor:"pointer",boxSizing:"border-box" }}>
+            <option value="pl">🇵🇱 Polski</option>
+            <option value="en">🇬🇧 English</option>
+            <option value="de">🇩🇪 Deutsch</option>
+          </select>
+        </div>
+      </div>
+      {/* Notifications */}
+      <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:10 }}>POWIADOMIENIA</div>
+      <div style={{ marginBottom:20 }}>
+        <Toggle on={notifEmail} set={setNotifEmail} label="Powiadomienia e-mail"/>
+        <Toggle on={notifSms}   set={setNotifSms}   label="Powiadomienia SMS"/>
+        <Toggle on={notifNew}   set={setNotifNew}   label="Nowe zamówienie"/>
+        <Toggle on={notifLow}   set={setNotifLow}   label="Niski stan magazynu"/>
+      </div>
+      {saved&&<div style={{ padding:"8px 12px",background:C.greenBg,color:C.green,fontSize:13,borderRadius:8,marginBottom:12 }}>✓ Zapisano zmiany</div>}
+      <div style={{ display:"flex",gap:10 }}>
+        <button onClick={onClose} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Zamknij</button>
+        <button onClick={save} disabled={saving} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:saving?0.6:1 }}>{saving?"Zapisywanie...":"💾 Zapisz zmiany"}</button>
+      </div>
+    </Modal>
+  );
+};
+
+// ── EMPLOYEES MODAL ────────────────────────────────────────
+const MOCK_EMPLOYEES = [
+  { id:"e1", name:"Aleksander Bludow",  email:"bludalex80@gmail.com",  role:"admin",     avatar:null,  active:true,  joined:"2025-01-15" },
+  { id:"e2", name:"Katarzyna Nowak",    email:"k.nowak@fruttino.pl",   role:"manager",   avatar:null,  active:true,  joined:"2025-03-01" },
+  { id:"e3", name:"Piotr Wiśniewski",   email:"p.wisniewski@gmail.com",role:"warehouse", avatar:null,  active:true,  joined:"2025-04-10" },
+  { id:"e4", name:"Anna Kowalczyk",     email:"a.kowalczyk@gmail.com", role:"viewer",    avatar:null,  active:false, joined:"2025-02-20" },
+];
+const ROLES = { admin:"Administrator", manager:"Menedżer", warehouse:"Magazyn", viewer:"Tylko podgląd" };
+const ROLE_COLORS = { admin:{bg:"#fee2e2",text:"#991b1b"}, manager:{bg:"#dbeafe",text:"#1e40af"}, warehouse:{bg:"#dcfce7",text:"#065f46"}, viewer:{bg:"#f3f4f6",text:"#6b7280"} };
+
+const EmployeesModal = ({ onClose, C }) => {
+  const [employees, setEmployees] = useState(MOCK_EMPLOYEES);
+  const [showAdd,   setShowAdd]   = useState(false);
+  const [newEmp,    setNewEmp]    = useState({ name:"", email:"", role:"viewer" });
+  const [adding,    setAdding]    = useState(false);
+
+  const addEmp = async () => {
+    setAdding(true);
+    await new Promise(r=>setTimeout(r,600));
+    setEmployees(prev=>[...prev,{...newEmp,id:"e"+Date.now(),avatar:null,active:true,joined:new Date().toISOString().slice(0,10)}]);
+    setNewEmp({name:"",email:"",role:"viewer"}); setShowAdd(false); setAdding(false);
+  };
+  const toggleActive = (id) => setEmployees(prev=>prev.map(e=>e.id===id?{...e,active:!e.active}:e));
+  const changeRole   = (id,role) => setEmployees(prev=>prev.map(e=>e.id===id?{...e,role}:e));
+
+  return (
+    <Modal title="👥 Profile pracowników" onClose={onClose} width={580} C={C}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16 }}>
+        <div style={{ fontSize:13,color:C.soft }}>{employees.filter(e=>e.active).length} aktywnych / {employees.length} łącznie</div>
+        <button onClick={()=>setShowAdd(!showAdd)} style={{ padding:"7px 16px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>+ Zaproś pracownika</button>
+      </div>
+      {/* Add form */}
+      {showAdd&&(
+        <Card C={C} style={{ padding:16,marginBottom:16,background:C.alt }}>
+          <div style={{ fontSize:12,fontWeight:700,color:C.text,marginBottom:12 }}>Nowy pracownik</div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10 }}>
+            <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>IMIĘ I NAZWISKO</div>
+              <input value={newEmp.name} onChange={e=>setNewEmp({...newEmp,name:e.target.value})} placeholder="Jan Kowalski" style={{ width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/></div>
+            <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>E-MAIL</div>
+              <input value={newEmp.email} onChange={e=>setNewEmp({...newEmp,email:e.target.value})} placeholder="email@firma.pl" type="email" style={{ width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/></div>
+          </div>
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>ROLA</div>
+            <select value={newEmp.role} onChange={e=>setNewEmp({...newEmp,role:e.target.value})} style={{ width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,cursor:"pointer",boxSizing:"border-box" }}>
+              {Object.entries(ROLES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          <div style={{ display:"flex",gap:8 }}>
+            <button onClick={()=>setShowAdd(false)} style={{ flex:1,padding:"8px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Anuluj</button>
+            <button onClick={addEmp} disabled={!newEmp.name||!newEmp.email||adding} style={{ flex:2,padding:"8px",borderRadius:7,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:!newEmp.name||!newEmp.email?0.5:1 }}>{adding?"Zapraszanie...":"✉ Wyślij zaproszenie"}</button>
+          </div>
+        </Card>
+      )}
+      {/* Employee list */}
+      <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+        {employees.map(e=>{
+          const rc=ROLE_COLORS[e.role]||ROLE_COLORS.viewer;
+          return (
+            <div key={e.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:10,border:`1px solid ${C.border}`,background:e.active?C.surface:C.alt,opacity:e.active?1:0.6 }}>
+              <div style={{ width:38,height:38,borderRadius:"50%",background:C.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.accent,flexShrink:0 }}>{e.name.slice(0,1)}</div>
+              <div style={{ flex:1,minWidth:0 }}>
+                <div style={{ fontSize:14,fontWeight:600,color:C.text }}>{e.name}</div>
+                <div style={{ fontSize:11,color:C.soft }}>{e.email}</div>
+              </div>
+              <select value={e.role} onChange={ev=>changeRole(e.id,ev.target.value)} style={{ padding:"5px 8px",borderRadius:7,border:`1px solid ${C.border}`,fontSize:12,fontFamily:"inherit",background:rc.bg,color:rc.text,cursor:"pointer",fontWeight:600 }}>
+                {Object.entries(ROLES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
+              </select>
+              <div onClick={()=>toggleActive(e.id)} style={{ width:34,height:19,borderRadius:10,background:e.active?C.green:C.border,cursor:"pointer",position:"relative",flexShrink:0 }}>
+                <div style={{ position:"absolute",top:2,left:e.active?16:2,width:15,height:15,borderRadius:"50%",background:"#fff",transition:"left 0.2s" }}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop:16,padding:"10px 14px",background:C.blueBg,borderRadius:8,fontSize:12,color:C.blue,lineHeight:1.7 }}>
+        ℹ Zaproszeni pracownicy logują się przez Google. Rola decyduje o poziomie dostępu do modułów CRM.
+      </div>
+    </Modal>
+  );
+};
+
+// ── SUBSCRIPTION MODAL ─────────────────────────────────────
+const MOCK_INVOICES = [
+  { id:"INV-2026-04", date:"2026-04-01", amount:149, status:"paid" },
+  { id:"INV-2026-03", date:"2026-03-01", amount:149, status:"paid" },
+  { id:"INV-2026-02", date:"2026-02-01", amount:149, status:"paid" },
+  { id:"INV-2026-01", date:"2026-01-01", amount:99,  status:"paid" },
+];
+const SubscriptionModal = ({ onClose, C }) => {
+  const plan = { name:"Plan Business", price:149, currency:"PLN", period:"miesiąc", renewDate:"2026-05-01", seats:5, seatsUsed:3 };
+  const usageItems = [
+    { label:"Zamówień (miesiąc)",    used:312,  max:1000,  unit:"" },
+    { label:"Produktów",              used:87,   max:500,   unit:"" },
+    { label:"Kanałów sprzedaży",      used:2,    max:5,     unit:"" },
+    { label:"Użytkowników",           used:plan.seatsUsed, max:plan.seats, unit:"" },
+    { label:"Pamięć (dokumenty)",     used:1.2,  max:10,    unit:" GB" },
+  ];
+  return (
+    <Modal title="💳 Abonament i płatności" onClose={onClose} width={520} C={C}>
+      {/* Current plan */}
+      <div style={{ background:`linear-gradient(135deg,${C.navy} 0%,#2d4e7e 100%)`,borderRadius:14,padding:20,marginBottom:20,color:"#fff" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start" }}>
+          <div>
+            <div style={{ fontSize:11,opacity:0.6,marginBottom:4,letterSpacing:1 }}>AKTYWNY PLAN</div>
+            <div style={{ fontSize:22,fontWeight:800,marginBottom:4 }}>{plan.name}</div>
+            <div style={{ fontSize:13,opacity:0.8 }}>Odnowienie: {plan.renewDate}</div>
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <div style={{ fontSize:32,fontWeight:800,fontFamily:"monospace" }}>{plan.price}</div>
+            <div style={{ fontSize:13,opacity:0.7 }}>{plan.currency} / {plan.period}</div>
+          </div>
+        </div>
+        <div style={{ display:"flex",gap:8,marginTop:14 }}>
+          <button style={{ padding:"7px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,0.3)",background:"rgba(255,255,255,0.1)",color:"#fff",fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>⬆ Zmień plan</button>
+          <button style={{ padding:"7px 16px",borderRadius:8,border:"1px solid rgba(255,255,255,0.3)",background:"transparent",color:"rgba(255,255,255,0.7)",fontSize:12,cursor:"pointer",fontFamily:"inherit" }}>Anuluj subskrypcję</button>
+        </div>
+      </div>
+      {/* Usage */}
+      <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>WYKORZYSTANIE</div>
+      <div style={{ display:"flex",flexDirection:"column",gap:10,marginBottom:20 }}>
+        {usageItems.map(u=>{
+          const pct=Math.min(100,Math.round(u.used/u.max*100));
+          const color=pct>=90?C.red:pct>=70?C.amber:C.accent;
+          return (
+            <div key={u.label}>
+              <div style={{ display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4 }}>
+                <span style={{ color:C.text }}>{u.label}</span>
+                <span style={{ color:C.mid,fontFamily:"monospace" }}>{u.used}{u.unit} / {u.max}{u.unit}</span>
+              </div>
+              <div style={{ height:6,borderRadius:3,background:C.border,overflow:"hidden" }}>
+                <div style={{ height:"100%",width:pct+"%",background:color,borderRadius:3,transition:"width 0.4s" }}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {/* Payment method */}
+      <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>METODA PŁATNOŚCI</div>
+      <div style={{ display:"flex",alignItems:"center",gap:12,padding:"12px 16px",border:`1px solid ${C.border}`,borderRadius:10,marginBottom:20 }}>
+        <span style={{ fontSize:24 }}>💳</span>
+        <div style={{ flex:1 }}><div style={{ fontSize:13,fontWeight:600,color:C.text }}>Visa •••• 4242</div><div style={{ fontSize:11,color:C.soft }}>Wygasa 12/2028</div></div>
+        <button style={{ padding:"6px 14px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Zmień</button>
+      </div>
+      {/* Invoices */}
+      <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:12 }}>HISTORIA FAKTUR</div>
+      <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+        {MOCK_INVOICES.map(inv=>(
+          <div key={inv.id} style={{ display:"flex",alignItems:"center",gap:12,padding:"9px 14px",borderRadius:9,border:`1px solid ${C.borderLight}`,background:C.alt }}>
+            <span style={{ fontSize:12,color:C.soft,fontFamily:"monospace" }}>{inv.id}</span>
+            <span style={{ fontSize:12,color:C.mid,flex:1 }}>{new Date(inv.date).toLocaleDateString("pl-PL",{year:"numeric",month:"long"})}</span>
+            <span style={{ fontSize:13,fontWeight:700,color:C.text,fontFamily:"monospace" }}>{inv.amount} PLN</span>
+            <span style={{ fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:100,background:C.greenBg,color:C.green }}>Opłacona</span>
+            <button style={{ padding:"5px 10px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:11,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>⬇ PDF</button>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+};
+
+// ── PROFILE MENU ───────────────────────────────────────────
 const ProfileMenu = ({ user, onLogout, theme, setTheme, C }) => {
   const [open,setOpen]=useState(false);
+  const [modal,setModal]=useState(null); // "account"|"employees"|"subscription"
   const ref=useRef(null);
   useEffect(()=>{ const h=(e)=>{ if(ref.current&&!ref.current.contains(e.target)) setOpen(false); }; document.addEventListener("mousedown",h); return()=>document.removeEventListener("mousedown",h); },[]);
+  const openModal=(m)=>{ setModal(m); setOpen(false); };
   return (
     <div ref={ref} style={{ position:"relative" }}>
       <button onClick={()=>setOpen(!open)} style={{ width:34,height:34,borderRadius:"50%",overflow:"hidden",border:"2px solid rgba(255,255,255,0.25)",cursor:"pointer",background:"rgba(255,255,255,0.15)",display:"flex",alignItems:"center",justifyContent:"center",padding:0 }}>
@@ -148,8 +402,8 @@ const ProfileMenu = ({ user, onLogout, theme, setTheme, C }) => {
             <div style={{ fontSize:13,fontWeight:600,color:C.text }}>{user?.user_metadata?.full_name||"Użytkownik"}</div>
             <div style={{ fontSize:11,color:C.soft }}>{user?.email}</div>
           </div>
-          {[{icon:"👤",label:"Moje konto"},{icon:"👥",label:"Profile pracowników"},{icon:"💳",label:"Abonament i płatności"}].map(item=>(
-            <button key={item.label} style={{ width:"100%",padding:"10px 16px",border:"none",background:"transparent",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontSize:13,color:C.text,fontFamily:"inherit",textAlign:"left" }}>
+          {[{icon:"👤",label:"Moje konto",modal:"account"},{icon:"👥",label:"Profile pracowników",modal:"employees"},{icon:"💳",label:"Abonament i płatności",modal:"subscription"}].map(item=>(
+            <button key={item.label} onClick={()=>openModal(item.modal)} style={{ width:"100%",padding:"10px 16px",border:"none",background:"transparent",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontSize:13,color:C.text,fontFamily:"inherit",textAlign:"left" }}>
               <span>{item.icon}</span>{item.label}
             </button>
           ))}
@@ -166,6 +420,9 @@ const ProfileMenu = ({ user, onLogout, theme, setTheme, C }) => {
           </button>
         </div>
       )}
+      {modal==="account"      && <MyAccountModal    user={user} onClose={()=>setModal(null)} C={C}/>}
+      {modal==="employees"    && <EmployeesModal                onClose={()=>setModal(null)} C={C}/>}
+      {modal==="subscription" && <SubscriptionModal             onClose={()=>setModal(null)} C={C}/>}
     </div>
   );
 };
