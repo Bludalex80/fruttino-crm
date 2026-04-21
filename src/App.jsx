@@ -1231,7 +1231,16 @@ const AllegroAuthModal = ({ channel, onClose, onSuccess, C }) => {
 };
 
 // ── CHANNELS TAB ───────────────────────────────────────────
+const MOCK_SYNC_LOG = [
+  { id:1, channel:"Allegro PL",    type:"allegro",    event:"Synchronizacja zamówień", orders:12, status:"ok",    ts:"2026-04-21T06:00:00Z" },
+  { id:2, channel:"Sklep WooComm", type:"woocommerce", event:"Webhook: order.created",  orders:1,  status:"ok",    ts:"2026-04-21T05:48:00Z" },
+  { id:3, channel:"Allegro PL",    type:"allegro",    event:"Synchronizacja zamówień", orders:8,  status:"ok",    ts:"2026-04-20T18:00:00Z" },
+  { id:4, channel:"Sklep WooComm", type:"woocommerce", event:"Webhook: order.updated",  orders:1,  status:"ok",    ts:"2026-04-20T17:32:00Z" },
+  { id:5, channel:"Allegro PL",    type:"allegro",    event:"Synchronizacja zamówień", orders:0,  status:"error", ts:"2026-04-20T12:00:00Z" },
+];
+
 const ChannelsTab = ({ isMobile, C }) => {
+  const [sub,setSub]=useState("channels");
   const [channels,setChannels]=useState([]);
   const [loading,setLoading]=useState(true);
   const [testing,setTesting]=useState(null);
@@ -1243,6 +1252,12 @@ const ChannelsTab = ({ isMobile, C }) => {
   const [saving,setSaving]=useState(false);
   const [editingName,setEditingName]=useState(null);
   const [newName,setNewName]=useState("");
+  const [showAddModal,setShowAddModal]=useState(false);
+  const [addType,setAddType]=useState("allegro");
+  const [addData,setAddData]=useState({name:"",country:"PL"});
+  const [addSaving,setAddSaving]=useState(false);
+  const [webhookCopied,setWebhookCopied]=useState({});
+  const [syncLog]=useState(MOCK_SYNC_LOG);
 
   const loadCh=async()=>{ setLoading(true);const res=await apiFetch("/channels");if(res.success)setChannels(res.data||[]);setLoading(false); };
   useEffect(()=>{loadCh();},[]);
@@ -1267,7 +1282,17 @@ const ChannelsTab = ({ isMobile, C }) => {
     setSaving(false);setConfigModal(null);await loadCh();
   };
 
+  const addChannel=async()=>{
+    setAddSaving(true);
+    await apiFetch("/channels",{method:"POST",body:JSON.stringify({...addData,type:addType,tenant_id:TENANT_ID,is_active:true})});
+    setAddSaving(false);setShowAddModal(false);setAddData({name:"",country:"PL"});await loadCh();
+  };
+
+  const copyWebhook=(key,text)=>{ navigator.clipboard.writeText(text).catch(()=>{}); setWebhookCopied(p=>({...p,[key]:true})); setTimeout(()=>setWebhookCopied(p=>({...p,[key]:false})),2000); };
+
   const inp={style:{width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none",boxSizing:"border-box"}};
+  const WEBHOOK_URL = `${SUPABASE_URL}/functions/v1/woocommerce-webhook`;
+  const wooChannels = channels.filter(c=>c.type==="woocommerce");
 
   const ConfigFields=({ch})=> ch.type==="woocommerce"?(
     <>
@@ -1280,77 +1305,187 @@ const ChannelsTab = ({ isMobile, C }) => {
 
   return (
     <div style={{ padding:isMobile?"12px 12px 20px":0 }}>
-      {!isMobile&&<div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
-        <h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Kanały sprzedaży</h2>
-        <div style={{ fontSize:13,color:C.soft }}>{channels.length} kanałów · <span style={{ color:C.green }}>Allegro Sandbox</span></div>
-      </div>}
-      {loading?<Spinner size={24} C={C}/>:(
-        <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(340px,1fr))",gap:isMobile?8:16 }}>
-          {channels.map(ch=>{
-            const src=ch.type==="allegro"?SOURCE.allegro:SOURCE.woocommerce;
-            const tr=testResult[ch.id];
-            const isEditing=editingName===ch.id;
-            const isAllegro=ch.type==="allegro";
-            const isConnected=ch.is_active&&(ch.access_token||ch.token_expires_at||ch.has_token);
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        {!isMobile&&<h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Kanały sprzedaży</h2>}
+        <button onClick={()=>setShowAddModal(true)} style={{ marginLeft:"auto",padding:"8px 18px",borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>+ Dodaj kanał</button>
+      </div>
 
-            return (
-              <Card key={ch.id} C={C} style={{ padding:20,border:isConnected?`1px solid ${C.green}`:`1px solid ${C.border}` }}>
-                {/* Nagłówek */}
-                <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12 }}>
-                  <div style={{ flex:1 }}>
-                    <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
-                      <Pill label={isAllegro?"Allegro":"WooCommerce"} color={src.color} bg={src.bg} textColor={src.color}/>
-                      <span style={{ fontSize:12,background:C.alt,color:C.mid,padding:"2px 8px",borderRadius:6,border:`1px solid ${C.border}` }}>{ch.country}</span>
-                      {isAllegro&&<span style={{ fontSize:10,background:"#fff7ed",color:"#ea580c",padding:"2px 6px",borderRadius:4,fontWeight:600 }}>SANDBOX</span>}
+      {/* Sub-tabs */}
+      <div style={{ display:"flex",gap:4,marginBottom:20,borderBottom:`1px solid ${C.border}` }}>
+        {[{id:"channels",label:`🔗 Kanały (${channels.length})`},{id:"webhooks",label:"🪝 Webhooki WooCommerce"},{id:"sync",label:"🔄 Synchronizacja"}].map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)} style={{ padding:"8px 18px",border:"none",borderBottom:`2px solid ${sub===t.id?C.accent:"transparent"}`,background:"transparent",color:sub===t.id?C.accent:C.mid,fontSize:13,fontWeight:sub===t.id?700:400,cursor:"pointer",fontFamily:"inherit",marginBottom:-1 }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── CHANNELS LIST ── */}
+      {sub==="channels" && (
+        loading ? <Spinner size={24} C={C}/> : (
+          <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(340px,1fr))",gap:isMobile?8:16 }}>
+            {channels.map(ch=>{
+              const src=ch.type==="allegro"?SOURCE.allegro:SOURCE.woocommerce;
+              const tr=testResult[ch.id];
+              const isEditing=editingName===ch.id;
+              const isAllegro=ch.type==="allegro";
+              const isConnected=ch.is_active&&(ch.access_token||ch.token_expires_at||ch.has_token);
+              return (
+                <Card key={ch.id} C={C} style={{ padding:20,border:isConnected?`1px solid ${C.green}`:`1px solid ${C.border}` }}>
+                  <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12 }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
+                        <Pill label={isAllegro?"Allegro":"WooCommerce"} color={src.color} bg={src.bg} textColor={src.color}/>
+                        <span style={{ fontSize:12,background:C.alt,color:C.mid,padding:"2px 8px",borderRadius:6,border:`1px solid ${C.border}` }}>{ch.country}</span>
+                        {isAllegro&&<span style={{ fontSize:10,background:"#fff7ed",color:"#ea580c",padding:"2px 6px",borderRadius:4,fontWeight:600 }}>SANDBOX</span>}
+                      </div>
+                      {isEditing?(
+                        <div style={{ display:"flex",gap:6,alignItems:"center" }}>
+                          <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveName(ch.id)} autoFocus style={{ flex:1,padding:"6px 10px",borderRadius:7,border:`1px solid ${C.accent}`,fontSize:14,fontWeight:600,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none" }}/>
+                          <button onClick={()=>saveName(ch.id)} style={{ padding:"6px 12px",borderRadius:7,border:"none",background:C.accent,color:"#fff",fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>✓</button>
+                          <button onClick={()=>setEditingName(null)} style={{ padding:"6px 10px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit" }}>✕</button>
+                        </div>
+                      ):(
+                        <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+                          <div style={{ fontSize:16,fontWeight:700,color:C.text }}>{ch.name}</div>
+                          <button onClick={()=>{setEditingName(ch.id);setNewName(ch.name);}} style={{ border:"none",background:"transparent",cursor:"pointer",color:C.soft,fontSize:13,padding:2 }}>✏</button>
+                        </div>
+                      )}
                     </div>
-                    {isEditing?(
-                      <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-                        <input value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveName(ch.id)} autoFocus style={{ flex:1,padding:"6px 10px",borderRadius:7,border:`1px solid ${C.accent}`,fontSize:14,fontWeight:600,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none" }}/>
-                        <button onClick={()=>saveName(ch.id)} style={{ padding:"6px 12px",borderRadius:7,border:"none",background:C.accent,color:"#fff",fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>✓</button>
-                        <button onClick={()=>setEditingName(null)} style={{ padding:"6px 10px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit" }}>✕</button>
-                      </div>
-                    ):(
-                      <div style={{ display:"flex",alignItems:"center",gap:6 }}>
-                        <div style={{ fontSize:16,fontWeight:700,color:C.text }}>{ch.name}</div>
-                        <button onClick={()=>{setEditingName(ch.id);setNewName(ch.name);}} style={{ border:"none",background:"transparent",cursor:"pointer",color:C.soft,fontSize:13,padding:2 }}>✏</button>
-                      </div>
-                    )}
+                    <div style={{ display:"flex",alignItems:"center",gap:5,flexShrink:0 }}>
+                      <span style={{ width:8,height:8,borderRadius:"50%",background:isConnected?C.green:C.soft,display:"block" }}/>
+                      <span style={{ fontSize:11,color:isConnected?C.green:C.soft,fontWeight:600 }}>{isConnected?"Połączony":"Niepołączony"}</span>
+                    </div>
                   </div>
-                  <div style={{ display:"flex",alignItems:"center",gap:5,flexShrink:0 }}>
-                    <span style={{ width:8,height:8,borderRadius:"50%",background:isConnected?C.green:C.soft,display:"block" }}/>
-                    <span style={{ fontSize:11,color:isConnected?C.green:C.soft,fontWeight:600 }}>{isConnected?"Połączony":"Niepołączony"}</span>
-                  </div>
-                </div>
+                  {tr&&<div style={{ marginBottom:12,fontSize:13,padding:"8px 12px",borderRadius:8,background:tr.has_keys?C.greenBg:C.amberBg,color:tr.has_keys?"#065f46":"#92400e" }}>{tr.has_keys?"✅":"⚠️"} {tr.message}</div>}
+                  {isAllegro?(
+                    <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                      <button onClick={()=>setAllegroModal(ch)} style={{ width:"100%",padding:"10px",borderRadius:9,border:isConnected?`1px solid ${C.green}`:"none",background:isConnected?C.greenBg:C.orange,color:isConnected?"#065f46":"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
+                        {isConnected?"✅ Połączono — odśwież token":"🔐 Połącz z Allegro (OAuth)"}
+                      </button>
+                      {isConnected&&(
+                        <div style={{ display:"flex",gap:8 }}>
+                          <button onClick={()=>testConn(ch.id)} disabled={testing===ch.id} style={{ flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===ch.id?0.6:1 }}>{testing===ch.id?"...":"🔍 Status"}</button>
+                          <button onClick={()=>syncOrders(ch)} disabled={syncing===ch.id} style={{ flex:2,padding:"8px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:syncing===ch.id?0.6:1 }}>{syncing===ch.id?"⏳ Synchronizacja...":"⬇ Synchronizuj zamówienia"}</button>
+                        </div>
+                      )}
+                    </div>
+                  ):(
+                    <div style={{ display:"flex",gap:8 }}>
+                      <button onClick={()=>testConn(ch.id)} disabled={testing===ch.id} style={{ flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===ch.id?0.6:1 }}>{testing===ch.id?"Testowanie...":"🔍 Testuj"}</button>
+                      <button onClick={()=>{setConfigModal(ch);setConfigData({});}} style={{ padding:"8px 16px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>⚙ Konfiguruj</button>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+            {channels.length===0&&!loading&&<Empty text="Brak skonfigurowanych kanałów — kliknij + Dodaj kanał" C={C}/>}
+          </div>
+        )
+      )}
 
-                {/* Wynik testu / synchronizacji */}
-                {tr&&<div style={{ marginBottom:12,fontSize:13,padding:"8px 12px",borderRadius:8,background:tr.has_keys?C.greenBg:C.amberBg,color:tr.has_keys?"#065f46":"#92400e" }}>{tr.has_keys?"✅":"⚠️"} {tr.message}</div>}
+      {/* ── WEBHOOKS TAB ── */}
+      {sub==="webhooks" && (
+        <div style={{ maxWidth:780 }}>
+          <Card C={C} style={{ padding:24,marginBottom:20 }}>
+            <div style={{ fontSize:14,fontWeight:700,color:C.text,marginBottom:4 }}>Webhook WooCommerce → Fruttino</div>
+            <div style={{ fontSize:13,color:C.soft,marginBottom:20,lineHeight:1.7 }}>WooCommerce wysyła zdarzenia (nowe zamówienie, zmiana statusu, aktualizacja produktu) do Fruttino przez HTTP POST. Skonfiguruj poniższy URL w panelu WooCommerce.</div>
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:11,color:C.soft,marginBottom:6,fontWeight:600 }}>URL WEBHOOKA (WooCommerce → Fruttino)</div>
+              <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+                <div style={{ flex:1,padding:"10px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.alt,fontSize:12,fontFamily:"monospace",color:C.text,wordBreak:"break-all" }}>{WEBHOOK_URL}</div>
+                <button onClick={()=>copyWebhook("main",WEBHOOK_URL)} style={{ padding:"9px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0 }}>
+                  {webhookCopied.main?"✓ Skopiowano":"📋 Kopiuj"}
+                </button>
+              </div>
+            </div>
+            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+              <div>
+                <div style={{ fontSize:11,color:C.soft,marginBottom:8,fontWeight:600 }}>OBSŁUGIWANE ZDARZENIA</div>
+                {[["order.created","Nowe zamówienie"],["order.updated","Zmiana statusu"],["order.deleted","Anulowanie"],["product.updated","Aktualizacja produktu"],["product.stock","Zmiana stanu magazyn."]].map(([ev,label])=>(
+                  <div key={ev} style={{ display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`,fontSize:12 }}>
+                    <span style={{ color:C.green,fontWeight:700 }}>✓</span>
+                    <span style={{ fontFamily:"monospace",color:C.accent,fontSize:11 }}>{ev}</span>
+                    <span style={{ color:C.mid }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div style={{ fontSize:11,color:C.soft,marginBottom:8,fontWeight:600 }}>KONFIGURACJA W WOOCOMMERCE</div>
+                {[["1","WooCommerce → Ustawienia → Zaawansowane → Webhooki"],["2","Kliknij Dodaj webhook"],["3",`Wklej URL: ${WEBHOOK_URL.slice(0,40)}...`],["4","Wybierz zdarzenie: Zamówienie — Utwórz"],["5","Ustaw status: Aktywny → Zapisz"],["6","Powtórz dla pozostałych zdarzeń"]].map(([n,step])=>(
+                  <div key={n} style={{ display:"flex",gap:10,padding:"5px 0",fontSize:12 }}>
+                    <span style={{ width:18,height:18,borderRadius:"50%",background:C.accent,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,flexShrink:0 }}>{n}</span>
+                    <span style={{ color:C.mid,lineHeight:1.5 }}>{step}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
 
-                {/* Przyciski akcji */}
-                {isAllegro?(
-                  <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
-                    <button onClick={()=>setAllegroModal(ch)} style={{ width:"100%",padding:"10px",borderRadius:9,border:isConnected?`1px solid ${C.green}`:"none",background:isConnected?C.greenBg:C.orange,color:isConnected?"#065f46":"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit" }}>
-                      {isConnected?"✅ Połączono — odśwież token":"🔐 Połącz z Allegro (OAuth)"}
-                    </button>
-                    {isConnected&&(
-                      <div style={{ display:"flex",gap:8 }}>
-                        <button onClick={()=>testConn(ch.id)} disabled={testing===ch.id} style={{ flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:12,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===ch.id?0.6:1 }}>
-                          {testing===ch.id?"...":"🔍 Status"}
-                        </button>
-                        <button onClick={()=>syncOrders(ch)} disabled={syncing===ch.id} style={{ flex:2,padding:"8px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",opacity:syncing===ch.id?0.6:1 }}>
-                          {syncing===ch.id?"⏳ Synchronizacja...":"⬇ Synchronizuj zamówienia"}
-                        </button>
-                      </div>
-                    )}
+          {/* Per-channel webhook URLs */}
+          {wooChannels.length > 0 && (
+            <Card C={C} style={{ padding:24 }}>
+              <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:16 }}>URL webhooka per kanał</div>
+              {wooChannels.map(ch=>{
+                const url=`${WEBHOOK_URL}?channel_id=${ch.id}&tenant_id=${TENANT_ID}`;
+                return (
+                  <div key={ch.id} style={{ marginBottom:14 }}>
+                    <div style={{ fontSize:12,fontWeight:600,color:C.text,marginBottom:6 }}>{ch.name}</div>
+                    <div style={{ display:"flex",gap:8 }}>
+                      <div style={{ flex:1,padding:"8px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:C.alt,fontSize:11,fontFamily:"monospace",color:C.mid,wordBreak:"break-all" }}>{url}</div>
+                      <button onClick={()=>copyWebhook(ch.id,url)} style={{ padding:"8px 12px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:11,cursor:"pointer",color:C.mid,fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0 }}>
+                        {webhookCopied[ch.id]?"✓":"📋"}
+                      </button>
+                    </div>
                   </div>
-                ):(
-                  <div style={{ display:"flex",gap:8 }}>
-                    <button onClick={()=>testConn(ch.id)} disabled={testing===ch.id} style={{ flex:1,padding:"8px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit",opacity:testing===ch.id?0.6:1 }}>{testing===ch.id?"Testowanie...":"🔍 Testuj"}</button>
-                    <button onClick={()=>{setConfigModal(ch);setConfigData({});}} style={{ padding:"8px 16px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>⚙ Konfiguruj</button>
-                  </div>
-                )}
+                );
+              })}
+            </Card>
+          )}
+          {wooChannels.length===0 && (
+            <div style={{ padding:"12px 16px",background:C.amberBg,borderRadius:10,fontSize:13,color:C.amber }}>
+              ⚠ Brak kanałów WooCommerce — dodaj kanał w zakładce Kanały.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── SYNC LOG ── */}
+      {sub==="sync" && (
+        <div>
+          <div style={{ display:"flex",gap:10,marginBottom:20 }}>
+            {[{label:"Wszystkich zdarzeń",val:syncLog.length,color:C.accent},{label:"Błędów",val:syncLog.filter(s=>s.status==="error").length,color:C.red},{label:"Zsynchronizowanych zamówień",val:syncLog.reduce((a,s)=>a+s.orders,0),color:C.green}].map(s=>(
+              <Card key={s.label} C={C} style={{ padding:"10px 16px",flex:1,display:"flex",gap:10,alignItems:"center" }}>
+                <span style={{ fontSize:20,fontWeight:800,fontFamily:"monospace",color:s.color }}>{s.val}</span>
+                <span style={{ fontSize:12,color:C.soft }}>{s.label}</span>
               </Card>
-            );
-          })}
+            ))}
+          </div>
+          <Card C={C} style={{ overflow:"hidden",marginBottom:20 }}>
+            <div style={{ padding:"12px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1 }}>LOG SYNCHRONIZACJI</div>
+              <button onClick={()=>{channels.forEach(ch=>{ if(ch.type==="allegro"&&(ch.access_token||ch.has_token)) syncOrders(ch); }); }} style={{ padding:"6px 14px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit" }}>🔄 Synchronizuj wszystkie</button>
+            </div>
+            <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:C.alt }}>
+                  {["Kanał","Zdarzenie","Zamówień","Status","Czas"].map(h=>(
+                    <th key={h} style={{ padding:"9px 16px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {syncLog.map(s=>(
+                  <tr key={s.id} style={{ borderBottom:`1px solid ${C.borderLight}` }}>
+                    <td style={{ padding:"10px 16px",fontSize:13,color:C.text,fontWeight:500 }}>{s.channel}</td>
+                    <td style={{ padding:"10px 16px",fontSize:12,color:C.mid }}>{s.event}</td>
+                    <td style={{ padding:"10px 16px",fontSize:13,fontFamily:"monospace",color:C.text }}>{s.orders}</td>
+                    <td style={{ padding:"10px 16px" }}>
+                      <span style={{ fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:100,background:s.status==="ok"?C.greenBg:C.redBg,color:s.status==="ok"?C.green:C.red }}>{s.status==="ok"?"OK":"Błąd"}</span>
+                    </td>
+                    <td style={{ padding:"10px 16px",fontSize:11,color:C.soft,fontFamily:"monospace" }}>{new Date(s.ts).toLocaleString("pl-PL")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
         </div>
       )}
 
@@ -1365,9 +1500,37 @@ const ChannelsTab = ({ isMobile, C }) => {
         </Modal>
       )}
 
-      {/* Modal Allegro OAuth */}
-      {allegroModal&&(
-        <AllegroAuthModal channel={allegroModal} onClose={()=>setAllegroModal(null)} onSuccess={loadCh} C={C}/>
+      {/* Allegro OAuth modal */}
+      {allegroModal&&<AllegroAuthModal channel={allegroModal} onClose={()=>setAllegroModal(null)} onSuccess={loadCh} C={C}/>}
+
+      {/* Add channel modal */}
+      {showAddModal&&(
+        <Modal title="+ Dodaj kanał sprzedaży" onClose={()=>setShowAddModal(false)} C={C} width={460}>
+          <div style={{ marginBottom:16 }}>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:8,fontWeight:600 }}>TYP KANAŁU</div>
+            <div style={{ display:"flex",gap:8 }}>
+              {[["allegro","🛒 Allegro"],["woocommerce","🔵 WooCommerce"],["manual","📋 Ręczny"]].map(([id,label])=>(
+                <button key={id} onClick={()=>setAddType(id)} style={{ flex:1,padding:"10px 6px",borderRadius:9,border:`1px solid ${addType===id?C.accent:C.border}`,background:addType===id?C.blueBg:C.surface,color:addType===id?C.accent:C.mid,fontSize:12,fontWeight:addType===id?700:400,cursor:"pointer",fontFamily:"inherit" }}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:6,fontWeight:600 }}>NAZWA KANAŁU</div>
+            <input value={addData.name} onChange={e=>setAddData({...addData,name:e.target.value})} placeholder={addType==="allegro"?"Allegro PL":addType==="woocommerce"?"Mój sklep":"Kanał ręczny"} style={{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none",boxSizing:"border-box" }}/>
+          </div>
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:11,color:C.soft,marginBottom:6,fontWeight:600 }}>KRAJ</div>
+            <select value={addData.country} onChange={e=>setAddData({...addData,country:e.target.value})} style={{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,cursor:"pointer",boxSizing:"border-box" }}>
+              {[["PL","🇵🇱 Polska"],["DE","🇩🇪 Niemcy"],["CZ","🇨🇿 Czechy"],["SK","🇸🇰 Słowacja"],["HU","🇭🇺 Węgry"]].map(([k,v])=><option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          {addType==="allegro"&&<div style={{ padding:"10px 14px",background:C.orangeBg,borderRadius:8,fontSize:12,color:C.orange,marginBottom:16,lineHeight:1.6 }}>Po dodaniu kanału kliknij "Połącz z Allegro (OAuth)" aby autoryzować dostęp.</div>}
+          {addType==="woocommerce"&&<div style={{ padding:"10px 14px",background:C.blueBg,borderRadius:8,fontSize:12,color:C.blue,marginBottom:16,lineHeight:1.6 }}>Po dodaniu kanału kliknij "Konfiguruj" aby wprowadzić Consumer Key i Secret z WooCommerce REST API.</div>}
+          <div style={{ display:"flex",gap:10 }}>
+            <button onClick={()=>setShowAddModal(false)} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Anuluj</button>
+            <button onClick={addChannel} disabled={!addData.name||addSaving} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:!addData.name||addSaving?"not-allowed":"pointer",fontFamily:"inherit",opacity:!addData.name||addSaving?0.6:1 }}>{addSaving?"Dodawanie...":"+ Dodaj kanał"}</button>
+          </div>
+        </Modal>
       )}
     </div>
   );
