@@ -209,8 +209,9 @@ const Sidebar = ({ tab, setTab, subTab, setSubTab, stats, C }) => {
     },
     { id:"channels",   icon:"🔗", label:"Kanały sprzedaży" },
     { id:"couriers",   icon:"🚚", label:"Kurierzy" },
-    { id:"deliveries", icon:"📥", label:"Dostawy" },
-    { id:"analytics",  icon:"📊", label:"Analityka" },
+    { id:"deliveries",   icon:"📥", label:"Dostawy" },
+    { id:"integrations", icon:"🔌", label:"Integracje" },
+    { id:"analytics",    icon:"📊", label:"Analityka" },
   ];
   const toggle=(id)=>setExpanded(p=>({...p,[id]:!p[id]}));
   return (
@@ -607,6 +608,8 @@ const ProductCardModal = ({ product, onClose, onSave, C }) => {
 const OrderDetailView = ({ order: initialOrder, orders, onBack, C, onStatusUpdate }) => {
   const [order, setOrder] = useState(initialOrder);
   const [updating, setUpdating] = useState(false);
+  const [showPosnet, setShowPosnet] = useState(false);
+  const [showSaldeo, setShowSaldeo] = useState(false);
   const idx = orders.findIndex(o => o.id === order.id);
   const st = STATUS_CFG[order.status] || STATUS_CFG.new;
   const src = SOURCE[order.channels?.type] || SOURCE.allegro;
@@ -632,11 +635,15 @@ const OrderDetailView = ({ order: initialOrder, orders, onBack, C, onStatusUpdat
           </div>
         </div>
         <div style={{ display:"flex",gap:6 }}>
-          {[{l:"🧾 Paragon"},{l:"📄 Faktura"},{l:"🖨 Drukuj",onClick:()=>window.print()},{l:"📦 Pakuj"},{l:"⚡ Akcje"}].map(btn=>(
+          <button onClick={()=>setShowPosnet(true)} style={{ padding:"7px 12px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500 }}>🧾 Paragon</button>
+          <button onClick={()=>setShowSaldeo(true)} style={{ padding:"7px 12px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500 }}>📄 Faktura</button>
+          {[{l:"🖨 Drukuj",onClick:()=>window.print()},{l:"📦 Pakuj"},{l:"⚡ Akcje"}].map(btn=>(
             <button key={btn.l} onClick={btn.onClick} style={{ padding:"7px 12px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:500 }}>{btn.l}</button>
           ))}
         </div>
       </div>
+      {showPosnet && <PosnetReceiptModal order={order} onClose={()=>setShowPosnet(false)} C={C}/>}
+      {showSaldeo && <SaldeoInvoiceModal order={order} onClose={()=>setShowSaldeo(false)} C={C}/>}
       {/* Title */}
       <div style={{ display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24 }}>
         <div>
@@ -1549,6 +1556,430 @@ const DeliveriesTab = ({ C }) => {
   );
 };
 
+// ── POSNET RECEIPT MODAL ───────────────────────────────────
+const PosnetReceiptModal = ({ order, onClose, C }) => {
+  const [printing, setPrinting] = useState(false);
+  const [result, setResult] = useState(null);
+  const ip   = localStorage.getItem("posnet_ip")   || "";
+  const port = localStorage.getItem("posnet_port") || "8080";
+  const items = Array.isArray(order.items) ? order.items : [];
+  const vatMap = { 23:"A", 8:"B", 5:"C", 0:"D" };
+  const printReceipt = async () => {
+    if (!ip) { setResult({ ok:false, msg:"Brak adresu IP drukarki. Skonfiguruj Posnet w Integracje → Posnet." }); return; }
+    setPrinting(true);
+    const receiptItems = items.map(it => ({
+      name: (it.name || "Produkt").slice(0, 40),
+      qty: it.quantity || 1,
+      price: parseFloat(it.price || 0),
+      vatRate: vatMap[order.vat_rate || 23] || "A",
+    }));
+    try {
+      const res = await fetch(`http://${ip}:${port}/api/receipt`, {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ cashier:"Kasjer", items:receiptItems, total:parseFloat(order.total_amount||0) }),
+        signal: AbortSignal.timeout(8000),
+      });
+      if (res.ok) {
+        const d = await res.json().catch(()=>({}));
+        setResult({ ok:true, msg:`Paragon wydrukowany${d.receiptNumber?" (#"+d.receiptNumber+")":""}` });
+      } else {
+        setResult({ ok:false, msg:`Błąd drukarki: HTTP ${res.status}` });
+      }
+    } catch(e) {
+      setResult({ ok:false, msg:`Brak połączenia z Posnet (${ip}:${port}) — sprawdź sieć lokalną` });
+    }
+    setPrinting(false);
+  };
+  const total = parseFloat(order.total_amount || 0);
+  const vatRate = order.vat_rate || 23;
+  const net = total / (1 + vatRate / 100);
+  const vat = total - net;
+  return (
+    <Modal title="🧾 Drukuj paragon — Posnet" onClose={onClose} width={480} C={C}>
+      <div style={{ fontSize:13,color:C.mid,marginBottom:16 }}>Zamówienie: <strong style={{ color:C.text }}>#{order.external_id||order.id?.slice(0,12)}</strong> · {order.customer_name}</div>
+      <Card C={C} style={{ padding:16,marginBottom:16,background:C.alt }}>
+        <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:10 }}>POZYCJE PARAGONU</div>
+        {items.length===0 ? <div style={{ fontSize:13,color:C.soft }}>Brak pozycji</div> : items.map((it,i)=>(
+          <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${C.borderLight}`,fontSize:13 }}>
+            <span style={{ color:C.text,flex:1 }}>{it.name||"Produkt"}</span>
+            <span style={{ color:C.mid,marginRight:16 }}>×{it.quantity||1}</span>
+            <span style={{ color:C.text,fontFamily:"monospace",fontWeight:600 }}>{(parseFloat(it.price||0)*(it.quantity||1)).toFixed(2)} zł</span>
+          </div>
+        ))}
+        <div style={{ marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",fontSize:13 }}>
+          <span style={{ color:C.soft }}>Netto ({vatRate}% VAT {vatMap[vatRate]||"A"})</span>
+          <span style={{ fontFamily:"monospace",color:C.mid }}>{net.toFixed(2)} zł</span>
+        </div>
+        <div style={{ display:"flex",justifyContent:"space-between",fontSize:13 }}>
+          <span style={{ color:C.soft }}>VAT</span>
+          <span style={{ fontFamily:"monospace",color:C.mid }}>{vat.toFixed(2)} zł</span>
+        </div>
+        <div style={{ display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:700,marginTop:6 }}>
+          <span style={{ color:C.text }}>SUMA</span>
+          <span style={{ fontFamily:"monospace",color:C.text }}>{total.toFixed(2)} zł</span>
+        </div>
+      </Card>
+      {ip ? (
+        <div style={{ fontSize:12,color:C.soft,marginBottom:14,display:"flex",alignItems:"center",gap:6 }}>
+          <span style={{ width:7,height:7,borderRadius:"50%",background:C.green,display:"inline-block" }}/>
+          Posnet: {ip}:{port}
+        </div>
+      ) : (
+        <div style={{ fontSize:12,color:C.amber,marginBottom:14,padding:"8px 12px",background:C.amberBg,borderRadius:8 }}>
+          ⚠ Drukarka nie skonfigurowana — przejdź do Integracje → Posnet
+        </div>
+      )}
+      {result && (
+        <div style={{ padding:"10px 14px",borderRadius:8,background:result.ok?C.greenBg:C.redBg,color:result.ok?C.green:C.red,fontSize:13,marginBottom:14 }}>
+          {result.ok?"✓":"⚠"} {result.msg}
+        </div>
+      )}
+      <div style={{ display:"flex",gap:10 }}>
+        <button onClick={onClose} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Zamknij</button>
+        <button onClick={printReceipt} disabled={printing||result?.ok} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:printing||result?.ok?"not-allowed":"pointer",fontFamily:"inherit",opacity:printing||result?.ok?0.6:1 }}>
+          {printing?"Drukowanie...":"🖨️ Drukuj paragon"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+// ── SALDEO INVOICE MODAL ───────────────────────────────────
+const SaldeoInvoiceModal = ({ order, onClose, C }) => {
+  const [creating, setCreating] = useState(false);
+  const [result, setResult] = useState(null);
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0,10));
+  const [paymentDays, setPaymentDays] = useState("14");
+  const [buyerName, setBuyerName] = useState(order.invoice_data?.name||order.customer_name||"");
+  const [buyerNip, setBuyerNip] = useState(order.invoice_data?.nip||"");
+  const [buyerAddress, setBuyerAddress] = useState(order.invoice_data?.address||[order.delivery_address?.street,order.delivery_address?.zip,order.delivery_address?.city].filter(Boolean).join(", ")||"");
+  const apiKey = localStorage.getItem("saldeo_key") || "";
+  const progName = localStorage.getItem("saldeo_prog") || "FruttinoCRM";
+  const items = Array.isArray(order.items) ? order.items : [];
+  const total = parseFloat(order.total_amount || 0);
+  const vatRate = order.vat_rate || 23;
+  const createInvoice = async () => {
+    if (!apiKey) { setResult({ ok:false, msg:"Brak klucza API SaldeoSMART. Skonfiguruj w Integracje → SaldeoSMART." }); return; }
+    setCreating(true);
+    const auth = btoa(`${progName}:${apiKey}`);
+    const payload = {
+      InvoiceDate: invoiceDate,
+      SaleDate: invoiceDate,
+      PaymentDays: parseInt(paymentDays)||14,
+      Buyer: { Name:buyerName, NIP:buyerNip, Address:buyerAddress },
+      Items: items.map(it=>({
+        Name: it.name||"Produkt",
+        Quantity: it.quantity||1,
+        UnitPrice: parseFloat(it.price||0),
+        VatRate: vatRate,
+      })),
+    };
+    try {
+      const res = await fetch("https://pulpit.saldeosmart.pl/api/Invoices", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", "Authorization":`Basic ${auth}` },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(12000),
+      });
+      if (res.ok) {
+        const d = await res.json().catch(()=>({}));
+        setResult({ ok:true, msg:`Faktura wystawiona${d.InvoiceNumber?" (#"+d.InvoiceNumber+")":""}` });
+      } else if (res.status===401||res.status===403) {
+        setResult({ ok:false, msg:"Błąd autoryzacji — sprawdź klucz API i nazwę programu" });
+      } else {
+        setResult({ ok:false, msg:`Błąd SaldeoSMART: HTTP ${res.status}` });
+      }
+    } catch(e) {
+      if (e.name==="TypeError"&&e.message.includes("fetch")) {
+        setResult({ ok:false, msg:"Błąd CORS — integracja SaldeoSMART wymaga serwera proxy (dodaj Edge Function)" });
+      } else {
+        setResult({ ok:false, msg:"Błąd połączenia z SaldeoSMART: "+e.message });
+      }
+    }
+    setCreating(false);
+  };
+  const inp = (v,s)=>({ value:v, onChange:e=>s(e.target.value), style:{ width:"100%",padding:"8px 10px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" } });
+  return (
+    <Modal title="📄 Wystaw fakturę VAT — SaldeoSMART" onClose={onClose} width={520} C={C}>
+      <div style={{ fontSize:13,color:C.mid,marginBottom:16 }}>Zamówienie: <strong style={{ color:C.text }}>#{order.external_id||order.id?.slice(0,12)}</strong> · {order.customer_name}</div>
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
+        <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>DATA WYSTAWIENIA</div><input type="date" {...inp(invoiceDate,setInvoiceDate)}/></div>
+        <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>TERMIN PŁATNOŚCI (DNI)</div><input type="number" {...inp(paymentDays,setPaymentDays)}/></div>
+      </div>
+      <div style={{ marginBottom:14 }}>
+        <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:10 }}>NABYWCA</div>
+        <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+          <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>NAZWA</div><input placeholder="Nazwa firmy / imię i nazwisko" {...inp(buyerName,setBuyerName)}/></div>
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:8 }}>
+            <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>NIP</div><input placeholder="000-000-00-00" {...inp(buyerNip,setBuyerNip)}/></div>
+          </div>
+          <div><div style={{ fontSize:11,color:C.soft,marginBottom:4 }}>ADRES</div><input placeholder="ul. Przykładowa 1, 00-000 Warszawa" {...inp(buyerAddress,setBuyerAddress)}/></div>
+        </div>
+      </div>
+      <Card C={C} style={{ padding:12,background:C.alt,marginBottom:14 }}>
+        <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:8 }}>POZYCJE</div>
+        {items.length===0 ? <div style={{ fontSize:13,color:C.soft }}>Brak pozycji</div> : items.map((it,i)=>(
+          <div key={i} style={{ display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:12,borderBottom:`1px solid ${C.borderLight}` }}>
+            <span style={{ color:C.text,flex:1 }}>{it.name||"Produkt"}</span>
+            <span style={{ color:C.mid,marginRight:12 }}>×{it.quantity||1} · VAT {vatRate}%</span>
+            <span style={{ fontFamily:"monospace",fontWeight:600,color:C.text }}>{(parseFloat(it.price||0)*(it.quantity||1)).toFixed(2)} zł</span>
+          </div>
+        ))}
+        <div style={{ display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:700,marginTop:8 }}>
+          <span style={{ color:C.text }}>Łącznie brutto</span>
+          <span style={{ fontFamily:"monospace",color:C.text }}>{total.toFixed(2)} zł</span>
+        </div>
+      </Card>
+      {!apiKey && <div style={{ fontSize:12,color:C.amber,marginBottom:12,padding:"8px 12px",background:C.amberBg,borderRadius:8 }}>⚠ Brak klucza API — skonfiguruj w Integracje → SaldeoSMART</div>}
+      {result && <div style={{ padding:"10px 14px",borderRadius:8,background:result.ok?C.greenBg:C.redBg,color:result.ok?C.green:C.red,fontSize:13,marginBottom:12 }}>{result.ok?"✓":"⚠"} {result.msg}</div>}
+      <div style={{ display:"flex",gap:10 }}>
+        <button onClick={onClose} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Zamknij</button>
+        <button onClick={createInvoice} disabled={creating||result?.ok} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:creating||result?.ok?"not-allowed":"pointer",fontFamily:"inherit",opacity:creating||result?.ok?0.6:1 }}>
+          {creating?"Wystawianie...":"📄 Wystaw fakturę"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+// ── VAT OSS MOCK DATA ──────────────────────────────────────
+const MOCK_VAT_OSS = [
+  { country:"DE", flag:"🇩🇪", orders:24, net:4820.00, vat_rate:19, vat:915.80 },
+  { country:"FR", flag:"🇫🇷", orders:18, net:3640.00, vat_rate:20, vat:728.00 },
+  { country:"CZ", flag:"🇨🇿", orders:12, net:1820.00, vat_rate:21, vat:382.20 },
+  { country:"SK", flag:"🇸🇰", orders:8,  net:1240.00, vat_rate:20, vat:248.00 },
+  { country:"HU", flag:"🇭🇺", orders:6,  net:960.00,  vat_rate:27, vat:259.20 },
+  { country:"RO", flag:"🇷🇴", orders:4,  net:480.00,  vat_rate:19, vat:91.20  },
+];
+
+// ── INTEGRACJE TAB ─────────────────────────────────────────
+const IntegracjeTab = ({ C }) => {
+  const [sub, setSub] = useState("posnet");
+  // Posnet
+  const [posIP,   setPosIP]   = useState(()=>localStorage.getItem("posnet_ip")||"");
+  const [posPort, setPosPort] = useState(()=>localStorage.getItem("posnet_port")||"8080");
+  const [posSaved, setPosSaved] = useState(false);
+  const [posTesting, setPosTesting] = useState(false);
+  const [posStatus, setPosStatus] = useState(null); // null | "ok" | "error"
+  // SaldeoSMART
+  const [saldeoKey,  setSaldeoKey]  = useState(()=>localStorage.getItem("saldeo_key")||"");
+  const [saldeoProg, setSaldeoProg] = useState(()=>localStorage.getItem("saldeo_prog")||"FruttinoCRM");
+  const [saldeoNip,  setSaldeoNip]  = useState(()=>localStorage.getItem("saldeo_nip")||"");
+  const [saldeoSaved, setSaldeoSaved] = useState(false);
+  const [saldeoTesting, setSaldeoTesting] = useState(false);
+  const [saldeoStatus, setSaldeoStatus] = useState(null);
+  // VAT OSS
+  const [ossQuarter, setOssQuarter] = useState("Q1 2026");
+
+  const savePosnet = () => {
+    localStorage.setItem("posnet_ip",   posIP);
+    localStorage.setItem("posnet_port", posPort);
+    setPosSaved(true); setTimeout(()=>setPosSaved(false), 2000);
+  };
+  const testPosnet = async () => {
+    if (!posIP) { setPosStatus("error"); return; }
+    setPosTesting(true); setPosStatus(null);
+    try {
+      const res = await fetch(`http://${posIP}:${posPort}/api/status`, { signal:AbortSignal.timeout(5000) });
+      setPosStatus(res.ok ? "ok" : "error");
+    } catch { setPosStatus("error"); }
+    setPosTesting(false);
+  };
+  const saveSaldeo = () => {
+    localStorage.setItem("saldeo_key",  saldeoKey);
+    localStorage.setItem("saldeo_prog", saldeoProg);
+    localStorage.setItem("saldeo_nip",  saldeoNip);
+    setSaldeoSaved(true); setTimeout(()=>setSaldeoSaved(false), 2000);
+  };
+  const testSaldeo = async () => {
+    if (!saldeoKey) { setSaldeoStatus("error"); return; }
+    setSaldeoTesting(true); setSaldeoStatus(null);
+    try {
+      const auth = btoa(`${saldeoProg}:${saldeoKey}`);
+      const res = await fetch("https://pulpit.saldeosmart.pl/api/Companies", {
+        headers:{ "Authorization":`Basic ${auth}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      setSaldeoStatus(res.ok ? "ok" : "error");
+    } catch { setSaldeoStatus("error"); }
+    setSaldeoTesting(false);
+  };
+
+  const inp = (v,s)=>({ value:v, onChange:e=>s(e.target.value), style:{ width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" } });
+  const tabs = [{id:"posnet",label:"🖨️ Posnet"},{id:"saldeo",label:"📄 SaldeoSMART"},{id:"vatoss",label:"🌍 VAT OSS"}];
+  const ossTotNet = MOCK_VAT_OSS.reduce((a,r)=>a+r.net,0);
+  const ossTotVat = MOCK_VAT_OSS.reduce((a,r)=>a+r.vat,0);
+
+  return (
+    <div>
+      <h2 style={{ fontSize:20,fontWeight:700,color:C.text,marginBottom:20 }}>Integracje</h2>
+      {/* Sub-tabs */}
+      <div style={{ display:"flex",gap:4,marginBottom:24,borderBottom:`1px solid ${C.border}`,paddingBottom:0 }}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)} style={{ padding:"9px 18px",border:"none",borderBottom:`2px solid ${sub===t.id?C.accent:"transparent"}`,background:"transparent",color:sub===t.id?C.accent:C.mid,fontSize:13,fontWeight:sub===t.id?700:400,cursor:"pointer",fontFamily:"inherit",marginBottom:-1 }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── POSNET ── */}
+      {sub==="posnet" && (
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,maxWidth:860 }}>
+          <Card C={C} style={{ padding:24 }}>
+            <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>Ustawienia drukarki fiskalnej</div>
+            <div style={{ fontSize:12,color:C.soft,marginBottom:20,lineHeight:1.7 }}>Połączenie z Posnet Server przez sieć lokalną. Drukarka musi być dostępna pod podanym adresem IP.</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+              <div>
+                <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>ADRES IP DRUKARKI</div>
+                <input placeholder="np. 192.168.1.100" {...inp(posIP,setPosIP)}/>
+                <div style={{ fontSize:11,color:C.soft,marginTop:4 }}>Adres serwera Posnet w sieci lokalnej</div>
+              </div>
+              <div>
+                <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>PORT (domyślnie 8080)</div>
+                <input type="number" placeholder="8080" {...inp(posPort,setPosPort)}/>
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:8,marginTop:20 }}>
+              <button onClick={testPosnet} disabled={posTesting} style={{ flex:1,padding:"9px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.alt,color:C.mid,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:posTesting?0.6:1 }}>
+                {posTesting?"Testowanie...":"🔌 Testuj połączenie"}
+              </button>
+              <button onClick={savePosnet} style={{ flex:1,padding:"9px 14px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>
+                {posSaved?"✓ Zapisano":"💾 Zapisz"}
+              </button>
+            </div>
+            {posStatus==="ok"  && <div style={{ marginTop:12,padding:"8px 12px",background:C.greenBg,color:C.green,fontSize:13,borderRadius:8 }}>✓ Połączenie z Posnet działa</div>}
+            {posStatus==="error" && <div style={{ marginTop:12,padding:"8px 12px",background:C.redBg,color:C.red,fontSize:13,borderRadius:8 }}>✗ Brak połączenia — sprawdź IP, port i sieć lokalną</div>}
+          </Card>
+          <Card C={C} style={{ padding:24 }}>
+            <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:16 }}>Obsługiwane stawki VAT</div>
+            {[{vat:"A",rate:"23%",color:C.red},{vat:"B",rate:"8%",color:C.orange},{vat:"C",rate:"5%",color:C.amber},{vat:"D",rate:"0% / zwolniony",color:C.green}].map(r=>(
+              <div key={r.vat} style={{ display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${C.borderLight}` }}>
+                <span style={{ width:30,height:30,borderRadius:8,background:r.color+"20",color:r.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:800 }}>{r.vat}</span>
+                <span style={{ fontSize:13,color:C.text }}>{r.rate}</span>
+              </div>
+            ))}
+            <div style={{ marginTop:16,padding:"10px 14px",background:C.blueBg,borderRadius:8,fontSize:12,color:C.blue,lineHeight:1.7 }}>
+              Stawka VAT jest pobierana z zamówienia. Sprawdź konfigurację stawek w ustawieniach produktów.
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── SALDEO ── */}
+      {sub==="saldeo" && (
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,maxWidth:860 }}>
+          <Card C={C} style={{ padding:24 }}>
+            <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:4 }}>Ustawienia SaldeoSMART</div>
+            <div style={{ fontSize:12,color:C.soft,marginBottom:20,lineHeight:1.7 }}>Połączenie z systemem SaldeoSMART do automatycznego wystawiania faktur VAT. Klucz API znajdziesz w panelu SaldeoSMART → Ustawienia → API.</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:14 }}>
+              <div>
+                <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>NAZWA PROGRAMU</div>
+                <input placeholder="np. FruttinoCRM" {...inp(saldeoProg,setSaldeoProg)}/>
+                <div style={{ fontSize:11,color:C.soft,marginTop:4 }}>Nazwa zarejestrowanego programu w SaldeoSMART</div>
+              </div>
+              <div>
+                <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>KLUCZ API</div>
+                <input type="password" placeholder="••••••••••••••••" {...inp(saldeoKey,setSaldeoKey)}/>
+              </div>
+              <div>
+                <div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>NIP FIRMY (sprzedawca)</div>
+                <input placeholder="000-000-00-00" {...inp(saldeoNip,setSaldeoNip)}/>
+              </div>
+            </div>
+            <div style={{ display:"flex",gap:8,marginTop:20 }}>
+              <button onClick={testSaldeo} disabled={saldeoTesting} style={{ flex:1,padding:"9px 14px",borderRadius:8,border:`1px solid ${C.border}`,background:C.alt,color:C.mid,fontSize:13,cursor:"pointer",fontFamily:"inherit",opacity:saldeoTesting?0.6:1 }}>
+                {saldeoTesting?"Testowanie...":"🔌 Testuj połączenie"}
+              </button>
+              <button onClick={saveSaldeo} style={{ flex:1,padding:"9px 14px",borderRadius:8,border:"none",background:C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>
+                {saldeoSaved?"✓ Zapisano":"💾 Zapisz"}
+              </button>
+            </div>
+            {saldeoStatus==="ok"    && <div style={{ marginTop:12,padding:"8px 12px",background:C.greenBg,color:C.green,fontSize:13,borderRadius:8 }}>✓ Połączenie z SaldeoSMART działa</div>}
+            {saldeoStatus==="error" && <div style={{ marginTop:12,padding:"8px 12px",background:C.redBg,color:C.red,fontSize:13,borderRadius:8 }}>✗ Błąd autoryzacji — sprawdź klucz API i nazwę programu</div>}
+          </Card>
+          <Card C={C} style={{ padding:24 }}>
+            <div style={{ fontSize:13,fontWeight:700,color:C.text,marginBottom:16 }}>Wystawianie faktur VAT</div>
+            <div style={{ display:"flex",flexDirection:"column",gap:12 }}>
+              {[{icon:"🛒",title:"Faktura z zamówienia",desc:"Przycisk [📄 Faktura] w widoku zamówienia — automatycznie uzupełnia dane nabywcy i pozycje."},{icon:"🔄",title:"Synchronizacja kontrahentów",desc:"Nabywcy z zamówień są automatycznie dodawani do bazy kontrahentów SaldeoSMART."},{icon:"📎",title:"Format faktur",desc:"Faktury VAT, zaliczkowe i korygujące zgodnie z rozporządzeniem MF."}].map(f=>(
+                <div key={f.title} style={{ display:"flex",gap:12,padding:"12px 0",borderBottom:`1px solid ${C.borderLight}` }}>
+                  <span style={{ fontSize:20,flexShrink:0,marginTop:2 }}>{f.icon}</span>
+                  <div><div style={{ fontSize:13,fontWeight:600,color:C.text,marginBottom:3 }}>{f.title}</div><div style={{ fontSize:12,color:C.soft,lineHeight:1.6 }}>{f.desc}</div></div>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop:16,padding:"10px 14px",background:C.amberBg,borderRadius:8,fontSize:12,color:C.amber,lineHeight:1.7 }}>
+              ⚠ Bezpośrednie wywołania API SaldeoSMART z przeglądarki mogą być blokowane przez CORS. W środowisku produkcyjnym zalecamy proxy przez Supabase Edge Function.
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── VAT OSS ── */}
+      {sub==="vatoss" && (
+        <div style={{ maxWidth:860 }}>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+            <div>
+              <div style={{ fontSize:15,fontWeight:700,color:C.text }}>Raport VAT OSS</div>
+              <div style={{ fontSize:12,color:C.soft }}>Sprzedaż do klientów B2C w UE — procedura One-Stop-Shop</div>
+            </div>
+            <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+              <select value={ossQuarter} onChange={e=>setOssQuarter(e.target.value)} style={{ padding:"7px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,cursor:"pointer" }}>
+                {["Q1 2026","Q4 2025","Q3 2025","Q2 2025"].map(q=><option key={q}>{q}</option>)}
+              </select>
+              <button style={{ padding:"8px 16px",borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:13,cursor:"pointer",fontFamily:"inherit" }}>⬇ Eksportuj XML</button>
+            </div>
+          </div>
+          {/* Summary cards */}
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:20 }}>
+            {[{label:"Kraje UE",value:MOCK_VAT_OSS.length,icon:"🌍"},{label:"Łącznie netto",value:ossTotNet.toFixed(2)+" zł",icon:"💰"},{label:"VAT do zapłaty",value:ossTotVat.toFixed(2)+" zł",icon:"🧾"}].map(c=>(
+              <Card key={c.label} C={C} style={{ padding:"14px 18px",display:"flex",gap:12,alignItems:"center" }}>
+                <span style={{ fontSize:24 }}>{c.icon}</span>
+                <div><div style={{ fontSize:20,fontWeight:800,color:C.text,fontFamily:"monospace" }}>{c.value}</div><div style={{ fontSize:11,color:C.soft,marginTop:2 }}>{c.label}</div></div>
+              </Card>
+            ))}
+          </div>
+          {/* Table */}
+          <Card C={C} style={{ overflow:"hidden" }}>
+            <div style={{ padding:"12px 20px",borderBottom:`1px solid ${C.border}` }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1 }}>SPRZEDAŻ WG KRAJÓW — {ossQuarter}</div>
+            </div>
+            <table style={{ width:"100%",borderCollapse:"collapse" }}>
+              <thead>
+                <tr style={{ background:C.alt }}>
+                  {["Kraj","Zamówień","Podstawa opodatkowania","Stawka VAT","Kwota VAT"].map(h=>(
+                    <th key={h} style={{ padding:"9px 16px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {MOCK_VAT_OSS.map(r=>(
+                  <tr key={r.country} style={{ borderBottom:`1px solid ${C.borderLight}` }}>
+                    <td style={{ padding:"11px 16px",fontSize:14 }}>{r.flag} {r.country}</td>
+                    <td style={{ padding:"11px 16px",fontSize:13,color:C.mid }}>{r.orders}</td>
+                    <td style={{ padding:"11px 16px",fontSize:13,fontFamily:"monospace",color:C.text }}>{r.net.toFixed(2)} zł</td>
+                    <td style={{ padding:"11px 16px",fontSize:13,color:C.mid }}>{r.vat_rate}%</td>
+                    <td style={{ padding:"11px 16px",fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.text }}>{r.vat.toFixed(2)} zł</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background:C.alt,borderTop:`1px solid ${C.border}` }}>
+                  <td colSpan={2} style={{ padding:"11px 16px",fontSize:12,fontWeight:700,color:C.soft }}>SUMA</td>
+                  <td style={{ padding:"11px 16px",fontSize:14,fontWeight:800,fontFamily:"monospace",color:C.text }}>{ossTotNet.toFixed(2)} zł</td>
+                  <td/>
+                  <td style={{ padding:"11px 16px",fontSize:14,fontWeight:800,fontFamily:"monospace",color:C.text }}>{ossTotVat.toFixed(2)} zł</td>
+                </tr>
+              </tfoot>
+            </table>
+          </Card>
+          <div style={{ marginTop:16,padding:"12px 16px",background:C.blueBg,borderRadius:10,fontSize:12,color:C.blue,lineHeight:1.8 }}>
+            ℹ Dane w raporcie VAT OSS są generowane na podstawie zamówień z krajów UE. Termin składania deklaracji OSS: do 30 dnia po zakończeniu kwartału. Deklarację składa się w systemie e-Urząd Skarbowy.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── ANALYTICS ──────────────────────────────────────────────
 const AnalyticsTab = ({ stats, user, isMobile, C }) => (
   <div style={{ display:"flex",flexDirection:"column",gap:isMobile?12:20 }}>
@@ -1637,8 +2068,9 @@ export default function App() {
     if(tab==="products")   return <ProductsTab subTab={subTab||"products-list"} isMobile={mobile} C={C}/>;
     if(tab==="channels")   return <ChannelsTab isMobile={mobile} C={C}/>;
     if(tab==="couriers")   return <CouriersTab isMobile={mobile} C={C}/>;
-    if(tab==="deliveries") return <DeliveriesTab C={C}/>;
-    if(tab==="analytics")  return <AnalyticsTab stats={stats} user={session.user} isMobile={mobile} C={C}/>;
+    if(tab==="deliveries")   return <DeliveriesTab C={C}/>;
+    if(tab==="integrations") return <IntegracjeTab C={C}/>;
+    if(tab==="analytics")    return <AnalyticsTab stats={stats} user={session.user} isMobile={mobile} C={C}/>;
     return null;
   };
 
