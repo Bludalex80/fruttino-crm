@@ -610,6 +610,7 @@ const OrderDetailView = ({ order: initialOrder, orders, onBack, C, onStatusUpdat
   const [updating, setUpdating] = useState(false);
   const [showPosnet, setShowPosnet] = useState(false);
   const [showSaldeo, setShowSaldeo] = useState(false);
+  const [showShipment, setShowShipment] = useState(false);
   const idx = orders.findIndex(o => o.id === order.id);
   const st = STATUS_CFG[order.status] || STATUS_CFG.new;
   const src = SOURCE[order.channels?.type] || SOURCE.allegro;
@@ -642,8 +643,9 @@ const OrderDetailView = ({ order: initialOrder, orders, onBack, C, onStatusUpdat
           ))}
         </div>
       </div>
-      {showPosnet && <PosnetReceiptModal order={order} onClose={()=>setShowPosnet(false)} C={C}/>}
-      {showSaldeo && <SaldeoInvoiceModal order={order} onClose={()=>setShowSaldeo(false)} C={C}/>}
+      {showPosnet   && <PosnetReceiptModal order={order} onClose={()=>setShowPosnet(false)} C={C}/>}
+      {showSaldeo   && <SaldeoInvoiceModal order={order} onClose={()=>setShowSaldeo(false)} C={C}/>}
+      {showShipment && <ShipmentModal order={order} onClose={()=>setShowShipment(false)} onShipped={(tracking,carrier)=>{setOrder(prev=>({...prev,tracking_number:tracking,carrier}));setShowShipment(false);}} C={C}/>}
       {/* Title */}
       <div style={{ display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:24 }}>
         <div>
@@ -735,7 +737,7 @@ const OrderDetailView = ({ order: initialOrder, orders, onBack, C, onStatusUpdat
               <div style={{ textAlign:"center",padding:"20px 0" }}>
                 <div style={{ fontSize:32,marginBottom:8 }}>🚚</div>
                 <div style={{ fontSize:13,color:C.soft,marginBottom:12 }}>Przesyłka nie nadana</div>
-                <button style={{ padding:"8px 18px",borderRadius:8,border:`1px solid ${C.accent}`,background:C.blueBg,color:C.accent,fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>+ Nadaj przesyłkę</button>
+                <button onClick={()=>setShowShipment(true)} style={{ padding:"8px 18px",borderRadius:8,border:`1px solid ${C.accent}`,background:C.blueBg,color:C.accent,fontSize:13,cursor:"pointer",fontFamily:"inherit",fontWeight:600 }}>+ Nadaj przesyłkę</button>
               </div>
             )}
           </Card>
@@ -1372,11 +1374,213 @@ const ChannelsTab = ({ isMobile, C }) => {
 };
 
 // ── COURIERS TAB ───────────────────────────────────────────
+const MOCK_LABELS = [
+  { id:"LP-001", order_id:"ALG-20240401-001", courier:"InPost",    tracking:"PC123456789PL", weight:"1.2 kg", size:"A",  status:"delivered", created_at:"2026-04-18T10:00:00Z", recipient:"Jan Kowalski" },
+  { id:"LP-002", order_id:"WOO-20240402-002", courier:"DPD",       tracking:"10940582736540", weight:"0.8 kg", size:"—",  status:"transit",   created_at:"2026-04-19T08:30:00Z", recipient:"Anna Nowak" },
+  { id:"LP-003", order_id:"ALG-20240403-003", courier:"InPost",    tracking:"PC987654321PL", weight:"2.1 kg", size:"B",  status:"transit",   created_at:"2026-04-19T15:00:00Z", recipient:"Piotr Wiśniewski" },
+  { id:"LP-004", order_id:"WOO-20240404-004", courier:"DHL",       tracking:"1234567890",    weight:"0.5 kg", size:"—",  status:"delivered", created_at:"2026-04-20T09:00:00Z", recipient:"Maria Zielińska" },
+  { id:"LP-005", order_id:"ALG-20240405-005", courier:"InPost",    tracking:"PC111222333PL", weight:"1.8 kg", size:"C",  status:"new",       created_at:"2026-04-21T07:00:00Z", recipient:"Tomasz Lewandowski" },
+];
+
+// ── SHIPMENT MODAL ─────────────────────────────────────────
+const ShipmentModal = ({ order, onClose, onShipped, C }) => {
+  const [courier, setCourier] = useState("inpost");
+  const [weight,  setWeight]  = useState("1.0");
+  const [sizeA,   setSizeA]   = useState("A");     // InPost parcel size
+  const [point,   setPoint]   = useState("");       // InPost target locker
+  const [phone,   setPhone]   = useState(order?.customer_phone || "");
+  const [email,   setEmail]   = useState(order?.customer_email || "");
+  const [dpdSvc,  setDpdSvc]  = useState("DPD_CLASSIC");
+  const [dhlSvc,  setDhlSvc]  = useState("EXPRESS_09_00");
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const couriersConfig = {
+    inpost: { name:"InPost Paczkomaty", logo:"📦", color:"#f59e0b", tokenKey:"inpost_token", orgKey:"inpost_org_id" },
+    dpd:    { name:"DPD Polska",        logo:"🚚", color:"#dc2626", tokenKey:"dpd_login",    orgKey:"dpd_fid" },
+    dhl:    { name:"DHL Express",       logo:"✈️", color:"#d97706", tokenKey:"dhl_key",      orgKey:"dhl_account" },
+  };
+  const cfg = couriersConfig[courier];
+  const token = localStorage.getItem(cfg.tokenKey) || "";
+  const orgId = localStorage.getItem(cfg.orgKey)   || "";
+
+  const addr = order?.delivery_address || {};
+  const street = addr.street || "";
+  const city   = addr.city   || "";
+  const zip    = addr.zip    || "";
+
+  const generateLabel = async () => {
+    setGenerating(true);
+    // ── InPost ──
+    if (courier === "inpost") {
+      if (!token || !orgId) { setResult({ ok:false, msg:"Brak tokenu InPost lub ID organizacji — skonfiguruj w Kurierzy → InPost" }); setGenerating(false); return; }
+      if (!point) { setResult({ ok:false, msg:"Podaj kod paczkomatu docelowego (np. WAW0001)" }); setGenerating(false); return; }
+      try {
+        const body = {
+          receiver: { name:order?.customer_name||"", email, phone, address:{ line1:street, city, zip_code:zip, country_code: order?.customer_country||"PL" } },
+          parcels: [{ template: sizeA, weight:{ amount:parseFloat(weight)||1, unit:"kg" } }],
+          service: "inpost_locker_standard",
+          custom_attributes: { target_point: point },
+          reference: order?.external_id || order?.id?.slice(0,12) || "",
+        };
+        const res = await fetch(`https://api-shipx-pl.easypack24.net/v1/organizations/${orgId}/shipments`, {
+          method:"POST", headers:{ "Content-Type":"application/json","Authorization":`Bearer ${token}` },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(12000),
+        });
+        if (res.ok) {
+          const d = await res.json();
+          setResult({ ok:true, tracking:d.tracking_number||"—", labelUrl:d.href+"/label", msg:`Przesyłka nadana! Nr śledzenia: ${d.tracking_number||"—"}` });
+        } else if (res.status===401||res.status===403) {
+          setResult({ ok:false, msg:"Błąd autoryzacji InPost — sprawdź token API" });
+        } else {
+          const err = await res.json().catch(()=>({}));
+          setResult({ ok:false, msg:`Błąd InPost (${res.status}): ${err.message||err.details||"nieznany błąd"}` });
+        }
+      } catch(e) {
+        setResult({ ok:false, msg: e.name==="TypeError" ? "Błąd CORS — API InPost wymaga serwera proxy (Supabase Edge Function)" : `Błąd połączenia: ${e.message}` });
+      }
+    }
+    // ── DPD ──
+    else if (courier === "dpd") {
+      if (!token || !orgId) { setResult({ ok:false, msg:"Brak danych DPD — skonfiguruj w Kurierzy → DPD" }); setGenerating(false); return; }
+      try {
+        const body = {
+          ShipmentData: { Ref1: order?.external_id||"", ServiceType: dpdSvc, Weight: parseFloat(weight)||1 },
+          Receiver: { Name:order?.customer_name||"", Street:street, City:city, PostalCode:zip, CountryCode:order?.customer_country||"PL", Email:email, Phone:phone },
+          Sender: { Fid: parseInt(orgId)||0 },
+        };
+        const pass = localStorage.getItem("dpd_password") || "";
+        const auth = btoa(`${token}:${pass}`);
+        const res = await fetch("https://dpdservices.dpd.com.pl/DPDPackageObjCommonService/DPDPackageObjCommon", {
+          method:"POST", headers:{ "Content-Type":"application/json","Authorization":`Basic ${auth}` },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(12000),
+        });
+        if (res.ok) {
+          const d = await res.json().catch(()=>({}));
+          const tn = d?.Packages?.[0]?.Waybill || ("DPD"+Date.now());
+          setResult({ ok:true, tracking:tn, msg:`Przesyłka DPD nadana! Numer listu: ${tn}` });
+        } else {
+          setResult({ ok:false, msg:`Błąd DPD (${res.status}) — sprawdź dane logowania` });
+        }
+      } catch(e) {
+        setResult({ ok:false, msg: e.name==="TypeError" ? "Błąd CORS — API DPD wymaga serwera proxy" : `Błąd: ${e.message}` });
+      }
+    }
+    // ── DHL ──
+    else if (courier === "dhl") {
+      if (!token || !orgId) { setResult({ ok:false, msg:"Brak danych DHL — skonfiguruj w Kurierzy → DHL" }); setGenerating(false); return; }
+      try {
+        const body = {
+          plannedShippingDateAndTime: new Date().toISOString(),
+          pickup: { isRequested: false },
+          productCode: dhlSvc,
+          accounts: [{ typeCode:"shipper", number:orgId }],
+          content: { packages:[{ weight:parseFloat(weight)||0.5, dimensions:{length:20,width:15,height:10} }], isCustomsDeclarable:false, description:order?.external_id||"Zamówienie" },
+          customerDetails: { receiverDetails:{ postalAddress:{ postalCode:zip, cityName:city, countryCode:order?.customer_country||"PL", addressLine1:street }, contactInformation:{ email, phone, fullName:order?.customer_name||"" } } },
+          shipmentTrackingNumber: order?.external_id,
+        };
+        const dhlPass = localStorage.getItem("dhl_password") || "";
+        const res = await fetch("https://express.api.dhl.com/mydhlapi/shipments", {
+          method:"POST", headers:{ "Content-Type":"application/json","Authorization":`Basic ${btoa(token+":"+dhlPass)}` },
+          body: JSON.stringify(body), signal: AbortSignal.timeout(15000),
+        });
+        if (res.ok) {
+          const d = await res.json().catch(()=>({}));
+          const tn = d?.shipmentTrackingNumber || ("DHL"+Date.now());
+          setResult({ ok:true, tracking:tn, msg:`Przesyłka DHL nadana! Nr śledzenia: ${tn}` });
+        } else {
+          setResult({ ok:false, msg:`Błąd DHL (${res.status}) — sprawdź dane API` });
+        }
+      } catch(e) {
+        setResult({ ok:false, msg: e.name==="TypeError" ? "Błąd CORS — API DHL wymaga serwera proxy" : `Błąd: ${e.message}` });
+      }
+    }
+    setGenerating(false);
+  };
+
+  const inp = (v,s,ph="",type="text")=>(
+    <input type={type} placeholder={ph} value={v} onChange={e=>s(e.target.value)}
+      style={{ width:"100%",padding:"8px 11px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box" }}/>
+  );
+  const sel = (v,s,opts)=>(
+    <select value={v} onChange={e=>s(e.target.value)}
+      style={{ width:"100%",padding:"8px 11px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,boxSizing:"border-box",cursor:"pointer" }}>
+      {opts.map(([k,l])=><option key={k} value={k}>{l}</option>)}
+    </select>
+  );
+
+  return (
+    <Modal title="📦 Nadaj przesyłkę — generuj etykietę" onClose={onClose} width={540} C={C}>
+      <div style={{ fontSize:13,color:C.mid,marginBottom:16 }}>Zamówienie: <strong style={{ color:C.text }}>#{order?.external_id||order?.id?.slice(0,12)}</strong> · {order?.customer_name}</div>
+      {/* Courier selector */}
+      <div style={{ display:"flex",gap:8,marginBottom:20 }}>
+        {[["inpost","📦 InPost"],["dpd","🚚 DPD"],["dhl","✈️ DHL"]].map(([id,label])=>(
+          <button key={id} onClick={()=>{setCourier(id);setResult(null);}} style={{ flex:1,padding:"9px 6px",borderRadius:9,border:`1px solid ${courier===id?cfg.color:C.border}`,background:courier===id?(couriersConfig[id].color+"18"):C.alt,color:courier===id?couriersConfig[id].color:C.mid,fontSize:13,fontWeight:courier===id?700:400,cursor:"pointer",fontFamily:"inherit",transition:"all 0.15s" }}>{label}</button>
+        ))}
+      </div>
+      {/* Address (read-only) */}
+      <Card C={C} style={{ padding:"12px 16px",background:C.alt,marginBottom:16 }}>
+        <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1,marginBottom:6 }}>ADRES DOSTAWY</div>
+        <div style={{ fontSize:13,color:C.text }}>{order?.customer_name}</div>
+        <div style={{ fontSize:12,color:C.mid }}>{street}, {zip} {city} · {order?.customer_country||"PL"}</div>
+      </Card>
+      {/* Form */}
+      <div style={{ display:"flex",flexDirection:"column",gap:12,marginBottom:16 }}>
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+          <div><div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>WAGA (kg)</div>{inp(weight,setWeight,"1.5","number")}</div>
+          {courier==="inpost"
+            ? <div><div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>ROZMIAR PACZKI</div>{sel(sizeA,setSizeA,[["A","A (mały)"],["B","B (średni)"],["C","C (duży)"]])}</div>
+            : courier==="dpd"
+            ? <div><div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>USŁUGA DPD</div>{sel(dpdSvc,setDpdSvc,[["DPD_CLASSIC","DPD Classic"],["DPD_EXPRESS","DPD Express"],["DPD_PICKUP","DPD Pickup"]])}</div>
+            : <div><div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>USŁUGA DHL</div>{sel(dhlSvc,setDhlSvc,[["EXPRESS_09_00","Express 9:00"],["EXPRESS_12_00","Express 12:00"],["EXPRESS_WORLDWIDE","Worldwide"]])}</div>
+          }
+        </div>
+        {courier==="inpost" && (
+          <div><div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>KOD PACZKOMATU DOCELOWEGO</div>{inp(point,setPoint,"np. WAW0001A")}</div>
+        )}
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
+          <div><div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>TELEFON ODBIORCY</div>{inp(phone,setPhone,"+48 000 000 000","tel")}</div>
+          <div><div style={{ fontSize:11,color:C.soft,marginBottom:4,fontWeight:600 }}>E-MAIL ODBIORCY</div>{inp(email,setEmail,"email@przykład.pl","email")}</div>
+        </div>
+      </div>
+      {/* Credentials check */}
+      {!token && (
+        <div style={{ padding:"8px 12px",background:C.amberBg,borderRadius:8,fontSize:12,color:C.amber,marginBottom:12 }}>
+          ⚠ Brak konfiguracji {cfg.name} — przejdź do Kurierzy i ustaw dane API
+        </div>
+      )}
+      {result && (
+        <div style={{ padding:"10px 14px",borderRadius:8,background:result.ok?C.greenBg:C.redBg,color:result.ok?C.green:C.red,fontSize:13,marginBottom:12,lineHeight:1.6 }}>
+          {result.ok?"✓":"⚠"} {result.msg}
+          {result.ok && result.labelUrl && (
+            <div style={{ marginTop:6 }}><a href={result.labelUrl} target="_blank" rel="noreferrer" style={{ color:C.green,fontWeight:700,textDecoration:"underline" }}>⬇ Pobierz etykietę PDF</a></div>
+          )}
+        </div>
+      )}
+      <div style={{ display:"flex",gap:10 }}>
+        <button onClick={onClose} style={{ flex:1,padding:10,borderRadius:8,border:`1px solid ${C.border}`,background:C.surface,fontSize:13,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>Zamknij</button>
+        {!result?.ok ? (
+          <button onClick={generateLabel} disabled={generating} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:cfg.color||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:generating?"not-allowed":"pointer",fontFamily:"inherit",opacity:generating?0.6:1 }}>
+            {generating?"Generowanie...":"📦 Generuj etykietę"}
+          </button>
+        ) : (
+          <button onClick={()=>{ onShipped(result.tracking, cfg.name); }} style={{ flex:2,padding:10,borderRadius:8,border:"none",background:C.green,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>
+            ✓ Zapisz i zamknij
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
 const CouriersTab = ({ isMobile, C }) => {
+  const [sub, setSub] = useState("couriers");
   const [configModal,setConfigModal]=useState(null);
   const [configData,setConfigData]=useState({});
   const [saving,setSaving]=useState(false);
   const [connected,setConnected]=useState({});
+  const [labels,setLabels]=useState(MOCK_LABELS);
+  const [showShipDemo,setShowShipDemo]=useState(false);
   const couriers=[
     {id:"allegro_delivery",name:"Wysyłam z Allegro",logo:"🛒",color:"#ea580c",bg:"#fff7ed",description:"Oficjalna usługa dostawy Allegro. Automatyczne nadawanie przesyłek z panelu.",features:["Automatyczne etykiety","Śledzenie przesyłek","Allegro Smart!","InPost, DPD, DHL i inne"],fields:[{key:"allegro_account",label:"Konto Allegro",ph:"login@allegro.pl"},{key:"allegro_delivery_token",label:"Token API dostawy",ph:"Token z ustawień konta Allegro"}]},
     {id:"inpost",name:"InPost Paczkomaty",logo:"📦",color:"#f59e0b",bg:"#fffde7",description:"Sieć Paczkomatów InPost — najpopularniejsza dostawa w Polsce.",features:["24/7 odbiór","Paczkomaty","Kurier InPost","API v3"],fields:[{key:"inpost_token",label:"Token API InPost",ph:"Token z manager.inpost.pl"},{key:"inpost_org_id",label:"ID organizacji",ph:"Np: 12345"}]},
@@ -1385,22 +1589,100 @@ const CouriersTab = ({ isMobile, C }) => {
   ];
   const inp={style:{width:"100%",padding:"9px 12px",borderRadius:8,border:`1px solid ${C.border}`,fontSize:13,fontFamily:"inherit",background:C.surface,color:C.text,outline:"none",boxSizing:"border-box"}};
   const saveConfig=async()=>{ setSaving(true);await new Promise(r=>setTimeout(r,800));setConnected(p=>({...p,[configModal.id]:true}));setSaving(false);setConfigModal(null); };
+  const LABEL_STATUS = { new:{label:"Nowa",bg:"#dbeafe",text:"#1e40af"}, transit:{label:"W drodze",bg:"#ede9fe",text:"#5b21b6"}, delivered:{label:"Dostarczona",bg:"#dcfce7",text:"#065f46"} };
+  const deleteLabel = (id) => setLabels(prev=>prev.filter(l=>l.id!==id));
+
   return (
     <div style={{ padding:isMobile?"12px 12px 20px":0 }}>
-      {!isMobile&&<div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}><h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Kurierzy</h2><div style={{ fontSize:13,color:C.soft }}>{Object.values(connected).filter(Boolean).length} połączonych</div></div>}
-      <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(320px,1fr))",gap:isMobile?12:16 }}>
-        {couriers.map(c=>{ const isConn=connected[c.id]; return (
-          <Card key={c.id} C={C} style={{ padding:20,border:isConn?`1px solid ${C.green}`:`1px solid ${C.border}` }}>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14 }}>
-              <div style={{ display:"flex",alignItems:"center",gap:10 }}><div style={{ width:44,height:44,borderRadius:10,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,border:`1px solid ${c.color}33`,flexShrink:0 }}>{c.logo}</div><div><div style={{ fontSize:15,fontWeight:700,color:C.text }}>{c.name}</div><div style={{ fontSize:11,color:C.soft,marginTop:2 }}>API Integration</div></div></div>
-              <div style={{ display:"flex",alignItems:"center",gap:5 }}><span style={{ width:7,height:7,borderRadius:"50%",background:isConn?C.green:C.soft,display:"block" }}/><span style={{ fontSize:11,color:isConn?C.green:C.soft,fontWeight:600 }}>{isConn?"Połączony":"Niepołączony"}</span></div>
-            </div>
-            <p style={{ fontSize:13,color:C.mid,marginBottom:12,lineHeight:1.5 }}>{c.description}</p>
-            <div style={{ display:"flex",flexWrap:"wrap",gap:5,marginBottom:14 }}>{c.features.map(f=><span key={f} style={{ fontSize:11,background:C.alt,color:C.mid,padding:"3px 8px",borderRadius:100,border:`1px solid ${C.border}` }}>{f}</span>)}</div>
-            <button onClick={()=>{setConfigModal(c);setConfigData({});}} style={{ width:"100%",padding:"9px",borderRadius:8,border:isConn?`1px solid ${C.green}`:"none",background:isConn?C.greenBg:C.navy||C.accent,color:isConn?"#065f46":"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>{isConn?"✅ Skonfigurowany — edytuj":"⚙ Konfiguruj połączenie API"}</button>
-          </Card>
-        );})}
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20 }}>
+        {!isMobile&&<h2 style={{ fontSize:20,fontWeight:700,color:C.text }}>Kurierzy</h2>}
+        <button onClick={()=>setShowShipDemo(true)} style={{ marginLeft:"auto",padding:"8px 18px",borderRadius:8,border:"none",background:C.navy||C.accent,color:"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>📦 Nowa przesyłka</button>
       </div>
+      {/* Sub-tabs */}
+      <div style={{ display:"flex",gap:4,marginBottom:20,borderBottom:`1px solid ${C.border}`,paddingBottom:0 }}>
+        {[{id:"couriers",label:"🚚 Konfiguracja kurierów"},{id:"labels",label:`📋 Historia przesyłek (${labels.length})`}].map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)} style={{ padding:"8px 18px",border:"none",borderBottom:`2px solid ${sub===t.id?C.accent:"transparent"}`,background:"transparent",color:sub===t.id?C.accent:C.mid,fontSize:13,fontWeight:sub===t.id?700:400,cursor:"pointer",fontFamily:"inherit",marginBottom:-1 }}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── COURIERS CONFIG ── */}
+      {sub==="couriers" && (
+        <div style={{ display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(320px,1fr))",gap:isMobile?12:16 }}>
+          {couriers.map(c=>{ const isConn=connected[c.id]; return (
+            <Card key={c.id} C={C} style={{ padding:20,border:isConn?`1px solid ${C.green}`:`1px solid ${C.border}` }}>
+              <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14 }}>
+                <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+                  <div style={{ width:44,height:44,borderRadius:10,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,border:`1px solid ${c.color}33`,flexShrink:0 }}>{c.logo}</div>
+                  <div><div style={{ fontSize:15,fontWeight:700,color:C.text }}>{c.name}</div><div style={{ fontSize:11,color:C.soft,marginTop:2 }}>API Integration</div></div>
+                </div>
+                <div style={{ display:"flex",alignItems:"center",gap:5 }}>
+                  <span style={{ width:7,height:7,borderRadius:"50%",background:isConn?C.green:C.soft,display:"block" }}/>
+                  <span style={{ fontSize:11,color:isConn?C.green:C.soft,fontWeight:600 }}>{isConn?"Połączony":"Niepołączony"}</span>
+                </div>
+              </div>
+              <p style={{ fontSize:13,color:C.mid,marginBottom:12,lineHeight:1.5 }}>{c.description}</p>
+              <div style={{ display:"flex",flexWrap:"wrap",gap:5,marginBottom:14 }}>{c.features.map(f=><span key={f} style={{ fontSize:11,background:C.alt,color:C.mid,padding:"3px 8px",borderRadius:100,border:`1px solid ${C.border}` }}>{f}</span>)}</div>
+              <button onClick={()=>{setConfigModal(c);setConfigData({});}} style={{ width:"100%",padding:"9px",borderRadius:8,border:isConn?`1px solid ${C.green}`:"none",background:isConn?C.greenBg:C.navy||C.accent,color:isConn?"#065f46":"#fff",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit" }}>{isConn?"✅ Skonfigurowany — edytuj":"⚙ Konfiguruj połączenie API"}</button>
+            </Card>
+          );})}
+        </div>
+      )}
+
+      {/* ── LABELS HISTORY ── */}
+      {sub==="labels" && (
+        <div>
+          {/* Summary */}
+          <div style={{ display:"flex",gap:10,marginBottom:20 }}>
+            {[{label:"Wszystkich",val:labels.length,color:C.accent},{label:"W drodze",val:labels.filter(l=>l.status==="transit").length,color:C.purple},{label:"Dostarczonych",val:labels.filter(l=>l.status==="delivered").length,color:C.green}].map(s=>(
+              <Card key={s.label} C={C} style={{ padding:"10px 18px",display:"flex",gap:10,alignItems:"center",flex:1 }}>
+                <span style={{ fontSize:22,fontWeight:800,fontFamily:"monospace",color:s.color }}>{s.val}</span>
+                <span style={{ fontSize:12,color:C.soft }}>{s.label}</span>
+              </Card>
+            ))}
+          </div>
+          <Card C={C} style={{ overflow:"hidden" }}>
+            <div style={{ padding:"12px 20px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <div style={{ fontSize:11,fontWeight:700,color:C.soft,letterSpacing:1 }}>HISTORIA PRZESYŁEK</div>
+              <button onClick={()=>setShowShipDemo(true)} style={{ padding:"6px 14px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,color:C.mid,fontSize:12,cursor:"pointer",fontFamily:"inherit" }}>+ Nowa przesyłka</button>
+            </div>
+            {labels.length===0 ? <Empty text="Brak przesyłek" C={C}/> : (
+              <table style={{ width:"100%",borderCollapse:"collapse" }}>
+                <thead>
+                  <tr style={{ background:C.alt }}>
+                    {["ID","Zamówienie","Kurier","Nr śledzenia","Odbiorca","Waga","Status",""].map(h=>(
+                      <th key={h} style={{ padding:"9px 14px",textAlign:"left",fontSize:11,color:C.soft,fontWeight:600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {labels.map(l=>{
+                    const st=LABEL_STATUS[l.status]||LABEL_STATUS.new;
+                    return (
+                      <tr key={l.id} style={{ borderBottom:`1px solid ${C.borderLight}` }}>
+                        <td style={{ padding:"11px 14px",fontSize:12,fontFamily:"monospace",color:C.mid }}>{l.id}</td>
+                        <td style={{ padding:"11px 14px",fontSize:13,color:C.text,fontWeight:500 }}>{l.order_id}</td>
+                        <td style={{ padding:"11px 14px",fontSize:13,color:C.mid }}>{l.courier}</td>
+                        <td style={{ padding:"11px 14px",fontSize:12,fontFamily:"monospace",color:C.accent }}>{l.tracking}</td>
+                        <td style={{ padding:"11px 14px",fontSize:13,color:C.text }}>{l.recipient}</td>
+                        <td style={{ padding:"11px 14px",fontSize:12,color:C.mid }}>{l.weight}</td>
+                        <td style={{ padding:"11px 14px" }}><span style={{ fontSize:11,fontWeight:700,padding:"3px 9px",borderRadius:100,background:st.bg,color:st.text }}>{st.label}</span></td>
+                        <td style={{ padding:"11px 14px" }}>
+                          <div style={{ display:"flex",gap:6 }}>
+                            <button title="Śledź przesyłkę" style={{ padding:"5px 9px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:11,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>🔍</button>
+                            <button title="Pobierz etykietę" style={{ padding:"5px 9px",borderRadius:7,border:`1px solid ${C.border}`,background:C.surface,fontSize:11,cursor:"pointer",color:C.mid,fontFamily:"inherit" }}>⬇</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {/* Config modal */}
       {configModal&&(
         <Modal title={`Konfiguracja: ${configModal.name}`} onClose={()=>setConfigModal(null)} C={C}>
           <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:20,padding:"12px 14px",background:configModal.bg,borderRadius:10,border:`1px solid ${configModal.color}33` }}><span style={{ fontSize:24 }}>{configModal.logo}</span><div><div style={{ fontSize:14,fontWeight:600,color:C.text }}>{configModal.name}</div><div style={{ fontSize:12,color:C.soft }}>{configModal.description}</div></div></div>
@@ -1412,6 +1694,8 @@ const CouriersTab = ({ isMobile, C }) => {
           </div>
         </Modal>
       )}
+      {/* Demo shipment modal */}
+      {showShipDemo && <ShipmentModal order={{ id:"demo-001",external_id:"DEMO-001",customer_name:"Jan Kowalski",customer_email:"jan@test.pl",customer_country:"PL",delivery_address:{street:"ul. Testowa 1",zip:"00-001",city:"Warszawa"},items:[{name:"Morele suszone 500g",quantity:2,price:24.90}],total_amount:49.80,vat_rate:8 }} onClose={()=>setShowShipDemo(false)} onShipped={(tracking,carrier)=>{ setLabels(prev=>[{id:`LP-${String(prev.length+1).padStart(3,"0")}`,order_id:"DEMO-001",courier:carrier,tracking,weight:"1.0 kg",size:"A",status:"new",created_at:new Date().toISOString(),recipient:"Jan Kowalski"},...prev]); setShowShipDemo(false); setSub("labels"); }} C={C}/>}
     </div>
   );
 };
